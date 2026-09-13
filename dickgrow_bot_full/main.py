@@ -130,6 +130,96 @@ def get_name(chat_id,uid):
 
 dp=Dispatcher()
 
+# ===== راهنمای بازی =====
+HELP_SECTIONS = {
+    "econ": (
+        "💰 اقتصاد پایه",
+        "🍆 /grow — هر چندساعت یه‌بار سایزت رو رشد بده\n"
+        "📊 /size — دیدن اندازه، اسپرم و بدهیت\n"
+        "🏆 /top — لیدربرد بزرگ‌ترین‌های گروه\n"
+        "💳 /loan — گرفتن وام (با بهره)\n"
+        "💵 /repay [مقدار] — پرداخت وام\n"
+        "🧬 /tosperm [مقدار سانت] — تبدیل سانت به اسپرم (نرخ ۱ به ۲)\n"
+        "💰 /tocent [مقدار اسپرم] — تبدیل اسپرم به سانت"
+    ),
+    "pvp": (
+        "⚔️ دوئل و رنک",
+        "⚔️ /pvp [مبلغ شرط] — چالش دادن به یه نفر برای دوئل ۱ به ۱\n"
+        "🏅 /rank — دیدن رنک، امتیاز (RP) و پیشرفت روزانه‌ت\n"
+        "🏆 /ranktop — لیدربرد رنک گروه\n"
+        "🍆 /dicko — رای‌گیری «Dicko of the Day» (۲ بار در روز، جایزه بین برنده‌ها تقسیم می‌شه)\n\n"
+        "نکته: شانس بردت تو دوئل ثابت نیست — اگه زیادی برده باشی شانست کم می‌شه، اگه زیادی باخته باشی شانست زیاد می‌شه تا عادلانه بمونه."
+    ),
+    "mafia": (
+        "🔫 مافیا",
+        "🔫 /mafia [مبلغ شرط] — ساختن یه نبرد مافیای تیمی (بدون محدودیت نفرات)\n"
+        "🕵️ /mafia2 [مبلغ شرط] — نسخه‌ی مخفیانه‌ی مافیا (تیم‌ها لو نمی‌رن)\n\n"
+        "بقیه با زدن دکمه‌ی داخل پیام به یه تیم ملحق می‌شن، بعد سازنده یا حریف با «شروع نبرد» بازی رو تموم می‌کنه. تیم بزرگ‌تر می‌بره و جایزه بین برنده‌ها تقسیم می‌شه."
+    ),
+    "celeb": (
+        "🌟 سلبریتی‌ها",
+        "🎰 /spin [تیر: S/A/B/PH] — اسپین گرفتن یه سلبریتی رندوم از یه تیر\n"
+        "🏪 /market — دیدن سلبریتی‌های قابل‌خرید\n"
+        "🛒 /buy [اسم] — خرید مستقیم یه سلبریتی از مارکت\n"
+        "📁 /collection — دیدن کلکسیون خودت\n"
+        "📜 /list — لیست کردن یه سلبریتی برای فروش به بقیه\n"
+        "💸 /sell [اسم] — فروش یه سلبریتی\n"
+        "🔒 /lock [اسم] — قفل کردن یه سلبریتی در برابر فروش خودکار (هزینه بر اساس تیرش فرق داره)\n"
+        "🏅 /collectors — کی بیشترین سلبریتی رو داره\n"
+        "💳 /gloan — وام مخصوص خرید سلبریتی\n"
+        "💵 /gpay [مقدار] — پرداخت اون وام\n\n"
+        "🍆 هر روز باید بابت سلبریتی‌هایی که داری «مالیات» بدی (بر اساس تیرشون):\n"
+        "📋 /taxstatus — دیدن مالیات امروزت قبل از کسر خودکار\n"
+        "💸 /paytax — پرداخت دستی مالیات امروز"
+    ),
+    "bourse": (
+        "📈 بورس",
+        "📈 /copen — باز کردن یه دور بورس (ادمین)\n"
+        "🧬 /invest — سرمایه‌گذاری مخفیانه روی یه شرکت (با اسپرم، از طریق پیوی)\n"
+        "📉 /cclose — بستن بورس و اعلام برنده‌ها (ادمین)\n"
+        "🏢 /mycompanies — شرکت‌هایی که بردی\n"
+        "📊 /bourseleader — جدول رنک بورس گروه (ارزش خالص، تعداد شرکت، بردها، سود روزانه)\n"
+        "🕵️ /useyar — فرستادن یه یار (کارگر) از شرکتت به یه نبرد مافیای فعلیت\n"
+        "💰 /cashout [شماره شرکت] — نقد کردن نصف ارزش یه شرکت به اسپرم\n\n"
+        "بورس با «اسپرم» کار می‌کنه، نه سانت — اول با /tosperm سانتت رو تبدیل کن."
+    ),
+}
+
+@dp.message(Command("help"))
+async def help_cmd(m: Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💰 اقتصاد پایه", callback_data="help:econ")],
+        [InlineKeyboardButton(text="⚔️ دوئل و رنک", callback_data="help:pvp")],
+        [InlineKeyboardButton(text="🔫 مافیا", callback_data="help:mafia")],
+        [InlineKeyboardButton(text="🌟 سلبریتی‌ها", callback_data="help:celeb")],
+        [InlineKeyboardButton(text="📈 بورس", callback_data="help:bourse")],
+    ])
+    await m.reply(
+        "📖 راهنمای بازی\n\n"
+        "یه بخش رو انتخاب کن تا کامندهاش رو ببینی:",
+        reply_markup=kb
+    )
+
+@dp.callback_query(F.data.startswith("help:"))
+async def help_section(q: CallbackQuery):
+    key = q.data.split(":")[1]
+    main_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💰 اقتصاد پایه", callback_data="help:econ")],
+        [InlineKeyboardButton(text="⚔️ دوئل و رنک", callback_data="help:pvp")],
+        [InlineKeyboardButton(text="🔫 مافیا", callback_data="help:mafia")],
+        [InlineKeyboardButton(text="🌟 سلبریتی‌ها", callback_data="help:celeb")],
+        [InlineKeyboardButton(text="📈 بورس", callback_data="help:bourse")],
+    ])
+    if key == "back" or key not in HELP_SECTIONS:
+        await q.message.edit_text("📖 راهنمای بازی\n\nیه بخش رو انتخاب کن تا کامندهاش رو ببینی:", reply_markup=main_kb)
+        return await q.answer()
+    title, body = HELP_SECTIONS[key]
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ برگشت به فهرست", callback_data="help:back")]
+    ])
+    await q.message.edit_text(f"{title}\n\n{body}", reply_markup=kb)
+    await q.answer()
+
 # نگهداری موقت سرمایه‌گذاری‌هایی که کاربر توی گروه دکمه‌ش رو زده ولی هنوز مبلغ رو توی پیوی نفرستاده
 pending_invest = {}  # user_id -> {"chat_id":..., "round_id":..., "slot":..., "ts":...}
 PENDING_INVEST_TTL = 10 * 60  # بعد از ۱۰ دقیقه منقضی می‌شه
@@ -2075,6 +2165,7 @@ async def main():
     bot=Bot(TOKEN)
     from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeDefault
     commands = [
+        BotCommand(command="help", description="📖 راهنمای کامل بازی"),
         BotCommand(command="grow", description="🌱 رشد کن"),
         BotCommand(command="size", description="📊 اندازه و پروفایل"),
         BotCommand(command="rank", description="🏅 رنک و پیشرفت روزانه"),
