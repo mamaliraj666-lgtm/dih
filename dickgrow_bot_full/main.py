@@ -12,7 +12,7 @@ logger = logging.getLogger("man_market_bot")
 TOKEN = os.getenv("BOT_TOKEN")
 DB = os.getenv("DB_PATH", "database.db")
 COOLDOWN=1*60*60
-ADMIN_ID=5952134460
+ADMIN_IDS = {5952134460, 5429762495}
 
 db_dir = os.path.dirname(DB)
 if db_dir:
@@ -1646,7 +1646,7 @@ async def celeb_tax_loop(bot):
 
 @dp.message(Command("addcm"))
 async def addcm(m:Message):
-    if m.from_user.id != ADMIN_ID:
+    if m.from_user.id not in ADMIN_IDS:
         return await m.reply("❌ دسترسی ندارید!")
     try:
         parts = m.text.split()
@@ -1664,7 +1664,7 @@ async def addcm(m:Message):
 
 @dp.message(Command("addsperm"))
 async def addsperm(m:Message):
-    if m.from_user.id != ADMIN_ID:
+    if m.from_user.id not in ADMIN_IDS:
         return await m.reply("❌ دسترسی ندارید!")
     try:
         parts = m.text.split()
@@ -1683,7 +1683,7 @@ async def addsperm(m:Message):
 
 @dp.message(Command("addspermall"))
 async def addsperm_all(m: Message):
-    if m.from_user.id != ADMIN_ID:
+    if m.from_user.id not in ADMIN_IDS:
         return await m.reply("❌ دسترسی ندارید!")
     try:
         amount = int(m.text.split()[1])
@@ -1697,7 +1697,7 @@ async def addsperm_all(m: Message):
 
 @dp.message(Command("addcb"))
 async def addcb(m:Message):
-    if m.from_user.id != ADMIN_ID:
+    if m.from_user.id not in ADMIN_IDS:
         return await m.reply("❌ دسترسی ندارید!")
     raw = strip_command(m.text)
     if not raw:
@@ -1850,7 +1850,7 @@ def get_round(chat_id):
 
 @dp.message(Command("copen"))
 async def company_open(m: Message):
-    if m.from_user.id != ADMIN_ID:
+    if m.from_user.id not in ADMIN_IDS:
         return await m.reply("❌ فقط ادمین می‌تونه بازار رو باز کنه!")
     round_id, status, open_time = get_round(m.chat.id)
     now = int(time.time())
@@ -1966,7 +1966,7 @@ async def company_invest_amount(m: Message):
 
 @dp.message(Command("cclose"))
 async def company_close(m: Message):
-    if m.from_user.id != ADMIN_ID:
+    if m.from_user.id not in ADMIN_IDS:
         return await m.reply("❌ فقط ادمین می‌تونه بازار رو ببنده!")
     round_id, status, open_time = get_round(m.chat.id)
     if status != 'open':
