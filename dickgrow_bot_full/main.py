@@ -1955,23 +1955,29 @@ def get_bourse_tier(net_worth):
 @dp.message(Command("bourseleader"))
 async def bourse_leaderboard(m: Message):
     rows = c.execute(
-        "SELECT owner_id, "
-        "COALESCE(SUM(CASE WHEN value>0 THEN value ELSE 0 END),0) AS net_worth, "
-        "SUM(CASE WHEN value>0 THEN 1 ELSE 0 END) AS companies, "
-        "COUNT(*) AS wins "
-        "FROM owned_companies WHERE chat_id=? GROUP BY owner_id ORDER BY net_worth DESC LIMIT 10",
+        "SELECT owner_id, value FROM owned_companies WHERE chat_id=?",
         (m.chat.id,)
     ).fetchall()
     if not rows:
         return await m.reply("📭 هنوز کسی تو بورس این گروه برنده نشده!")
+    stats = {}
+    for owner_id, value in rows:
+        s = stats.setdefault(owner_id, {"net_worth": 0, "companies": 0, "wins": 0, "daily_income": 0})
+        s["wins"] += 1
+        if value > 0:
+            s["net_worth"] += value
+            s["companies"] += 1
+            s["daily_income"] += int(value * COMPANY_DIVIDEND_PCT)
+    leaderboard = sorted(stats.items(), key=lambda kv: kv[1]["net_worth"], reverse=True)[:10]
     txt = "📊 جدول بورس این گروه\n\n"
-    for i, (owner_id, net_worth, companies, wins) in enumerate(rows, 1):
+    for i, (owner_id, s) in enumerate(leaderboard, 1):
         name = get_name(m.chat.id, owner_id)
-        tier = get_bourse_tier(net_worth)
+        tier = get_bourse_tier(s["net_worth"])
         txt += (
             f"{i}. {name}\n"
             f"   {tier}\n"
-            f"   🧬 ارزش خالص: {net_worth} اسپرم | 🏢 شرکت‌های فعال: {companies} | 🏆 کل بردها: {wins}\n\n"
+            f"   🧬 ارزش خالص: {s['net_worth']} اسپرم | 🏢 شرکت‌های فعال: {s['companies']} | 🏆 کل بردها: {s['wins']}\n"
+            f"   📈 مجموع سود روزانه: {s['daily_income']} اسپرم\n\n"
         )
     await m.reply(txt)
 
