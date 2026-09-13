@@ -2081,7 +2081,7 @@ async def main():
         BotCommand(command="addcm", description="➕ افزودن سانت به کاربر (ادمین)"),
         BotCommand(command="addsperm", description="➕ افزودن اسپرم به کاربر (ادمین)"),
         BotCommand(command="addcb", description="👑 دادن/گرفتن سلبریتی از کاربر (ادمین)"),
-        BotCommand(command="getfileid", description="🆔 گرفتن file_id عکس (ادمین)"),
+        BotCommand(command="getfileid", description="🆔 گرفتن file_id عکس  (ادمین)"),
     ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
     await bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats())
