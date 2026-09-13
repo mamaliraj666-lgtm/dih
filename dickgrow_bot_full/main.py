@@ -1591,6 +1591,20 @@ async def addsperm(m:Message):
     await m.reply(f"✅ {amount} اسپرم به {m.reply_to_message.from_user.full_name} اضافه شد!\n🧬 اسپرم جدید: {new_sperm}")
 
 
+@dp.message(Command("addspermall"))
+async def addsperm_all(m: Message):
+    if m.from_user.id != ADMIN_ID:
+        return await m.reply("❌ دسترسی ندارید!")
+    try:
+        amount = int(m.text.split()[1])
+    except:
+        return await m.reply("Usage: /addspermall [amount]\nمثال: /addspermall 100")
+    c.execute("UPDATE users SET sperm=sperm+? WHERE chat_id=?", (amount, m.chat.id))
+    affected = c.rowcount
+    db.commit()
+    await m.reply(f"✅ {amount} اسپرم به همه‌ی {affected} کاربر این گروه اضافه شد!")
+
+
 @dp.message(Command("addcb"))
 async def addcb(m:Message):
     if m.from_user.id != ADMIN_ID:
@@ -2090,6 +2104,7 @@ async def main():
         BotCommand(command="cashout", description="💸 نقد کردن نصف ارزش کمپانی"),
         BotCommand(command="addcm", description="➕ افزودن سانت به کاربر (ادمین)"),
         BotCommand(command="addsperm", description="➕ افزودن اسپرم به کاربر (ادمین)"),
+        BotCommand(command="addspermall", description="➕ افزودن اسپرم به همه (ادمین)"),
         BotCommand(command="addcb", description="👑 دادن/گرفتن سلبریتی از کاربر (ادمین)"),
         BotCommand(command="getfileid", description="🆔 گرفتن file_id عکس (ادمین)"),
     ]
