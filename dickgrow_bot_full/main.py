@@ -469,6 +469,7 @@ async def dicko_close_later(bot, sid, chat_id, msg_id):
 async def pvp(m:Message):
     try: bet=int(m.text.split()[1])
     except: return await m.reply("Usage: /pvp 30")
+    if bet<=0: return await m.reply("❌ مقدار شرط باید عدد مثبت باشه!")
     user(m.chat.id,m.from_user.id,m.from_user.full_name)
     s=get_size(m.chat.id,m.from_user.id)
     if s<bet: return await m.reply("Not enough cm.")
