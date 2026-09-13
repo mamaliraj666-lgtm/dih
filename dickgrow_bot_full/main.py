@@ -31,6 +31,39 @@ c.execute("""CREATE TABLE IF NOT EXISTS users(
     PRIMARY KEY(chat_id, user_id)
 )""")
 c.execute("CREATE TABLE IF NOT EXISTS battles(id INTEGER PRIMARY KEY AUTOINCREMENT,creator INTEGER,bet INTEGER,active INTEGER DEFAULT 1)")
+c.execute("""CREATE TABLE IF NOT EXISTS pvp_stats(
+    chat_id INTEGER,
+    user_id INTEGER,
+    wins INTEGER DEFAULT 0,
+    losses INTEGER DEFAULT 0,
+    PRIMARY KEY(chat_id, user_id)
+)""")
+c.execute("""CREATE TABLE IF NOT EXISTS rank_stats(
+    chat_id INTEGER,
+    user_id INTEGER,
+    rp INTEGER DEFAULT 0,
+    duels_today INTEGER DEFAULT 0,
+    last_active_day TEXT DEFAULT '',
+    PRIMARY KEY(chat_id, user_id)
+)""")
+c.execute("""CREATE TABLE IF NOT EXISTS dicko_sessions(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER,
+    active INTEGER DEFAULT 1,
+    created_at INTEGER
+)""")
+c.execute("""CREATE TABLE IF NOT EXISTS dicko_votes(
+    session_id INTEGER,
+    voter_id INTEGER,
+    candidate_id INTEGER,
+    PRIMARY KEY(session_id, voter_id)
+)""")
+c.execute("""CREATE TABLE IF NOT EXISTS dicko_daily(
+    chat_id INTEGER,
+    day TEXT,
+    count INTEGER DEFAULT 0,
+    PRIMARY KEY(chat_id, day)
+)""")
 c.execute("""CREATE TABLE IF NOT EXISTS loans(
     chat_id INTEGER,
     lender_id INTEGER,
@@ -212,6 +245,210 @@ async def top(m:Message):
     for i,(n,s) in enumerate(rows,1): txt+=f"{i}. {n} — {s} سانت\n"
     await m.reply(txt)
 
+PVP_MIN_GAMES = 3          # قبل از این تعداد دوئل، اصلاً تصحیح انجام نمی‌شه (شانس خام 50-50 می‌مونه)
+PVP_BALANCE_STRENGTH = 0.6 # هرچقدر بیشتر، میل به 50٪ قوی‌تره (0 = بی‌اثر، 1 = خیلی قوی)
+PVP_PROB_MIN = 0.25        # کف احتمال برد (هیچ‌وقت شانس کسی از این کمتر نمی‌شه)
+PVP_PROB_MAX = 0.75        # سقف احتمال برد (هیچ‌وقت شانس کسی از این بیشتر نمی‌شه)
+
+def get_pvp_winrate(chat_id, uid):
+    row = c.execute("SELECT wins,losses FROM pvp_stats WHERE chat_id=? AND user_id=?", (chat_id, uid)).fetchone()
+    if not row:
+        return 0.5, 0
+    wins, losses = row
+    games = wins + losses
+    if games < PVP_MIN_GAMES:
+        return 0.5, games
+    return wins / games, games
+
+def bump_pvp_stats(chat_id, winner, loser):
+    for uid, w, l in ((winner, 1, 0), (loser, 0, 1)):
+        c.execute(
+            "INSERT INTO pvp_stats(chat_id,user_id,wins,losses) VALUES(?,?,?,?) "
+            "ON CONFLICT(chat_id,user_id) DO UPDATE SET wins=wins+excluded.wins, losses=losses+excluded.losses",
+            (chat_id, uid, w, l)
+        )
+
+# ===== سیستم رنک =====
+RANK_DAILY_QUOTA = 6          # حداقل دوئل لازم در روز تا رنک نریزه
+RANK_WIN_RP = 20              # امتیاز رنک برای برد
+RANK_LOSS_RP = 10             # امتیاز رنک کم‌شده برای باخت
+RANK_DECAY_PER_MISSED_DAY = 15  # ریزش رنک به‌ازای هر روزی که حدنصاب رعایت نشده
+RANK_TIERS = [
+    (0,    "🥒 نوپا"),
+    (100,  "🌭 آماتور"),
+    (250,  "🍆 حرفه‌ای"),
+    (500,  "🚀 استاد"),
+    (900,  "👑 افسانه‌ای"),
+]
+
+def today_str():
+    return time.strftime("%Y-%m-%d", time.gmtime())
+
+def get_rank_tier(rp):
+    tier = RANK_TIERS[0][1]
+    for threshold, name in RANK_TIERS:
+        if rp >= threshold:
+            tier = name
+    return tier
+
+def ensure_rank_row(chat_id, uid):
+    row = c.execute("SELECT rp,duels_today,last_active_day FROM rank_stats WHERE chat_id=? AND user_id=?", (chat_id, uid)).fetchone()
+    if not row:
+        c.execute("INSERT INTO rank_stats(chat_id,user_id,rp,duels_today,last_active_day) VALUES(?,?,0,0,?)", (chat_id, uid, today_str()))
+        db.commit()
+        return 0, 0, today_str()
+    return row
+
+def apply_daily_decay(chat_id, uid):
+    """اگه از آخرین باری که دوئل زده روز(ها) گذشته باشه و اون روزها حدنصاب رعایت نشده، رنک می‌ریزه."""
+    rp, duels_today, last_day = ensure_rank_row(chat_id, uid)
+    today = today_str()
+    if last_day == today:
+        return rp, duels_today
+    try:
+        gap = (
+            time.mktime(time.strptime(today, "%Y-%m-%d")) -
+            time.mktime(time.strptime(last_day, "%Y-%m-%d"))
+        ) / 86400
+        gap = int(round(gap))
+    except Exception:
+        gap = 1
+    if gap < 1:
+        gap = 1
+    missed_days = gap if duels_today < RANK_DAILY_QUOTA else gap - 1
+    if missed_days > 0:
+        rp = max(0, rp - missed_days * RANK_DECAY_PER_MISSED_DAY)
+    c.execute("UPDATE rank_stats SET rp=?,duels_today=0,last_active_day=? WHERE chat_id=? AND user_id=?", (rp, today, chat_id, uid))
+    db.commit()
+    return rp, 0
+
+def record_rank_duel(chat_id, winner, loser):
+    for uid, delta in ((winner, RANK_WIN_RP), (loser, -RANK_LOSS_RP)):
+        rp, duels_today = apply_daily_decay(chat_id, uid)
+        rp = max(0, rp + delta)
+        duels_today += 1
+        c.execute("UPDATE rank_stats SET rp=?,duels_today=? WHERE chat_id=? AND user_id=?", (rp, duels_today, chat_id, uid))
+    db.commit()
+
+@dp.message(Command("rank"))
+async def rank_cmd(m: Message):
+    user(m.chat.id, m.from_user.id, m.from_user.full_name)
+    rp, duels_today = apply_daily_decay(m.chat.id, m.from_user.id)
+    tier = get_rank_tier(rp)
+    left = max(0, RANK_DAILY_QUOTA - duels_today)
+    quota_txt = "✅ حدنصاب امروز رعایت شده!" if left == 0 else f"⚠️ {left} دوئل دیگه مونده تا رنکت فردا نریزه!"
+    await m.reply(
+        f"🏅 رنک شما\n\n"
+        f"{tier}\n"
+        f"📊 امتیاز: {rp} RP\n"
+        f"⚔️ دوئل امروز: {duels_today}/{RANK_DAILY_QUOTA}\n\n"
+        f"{quota_txt}"
+    )
+
+@dp.message(Command("ranktop"))
+async def rank_top(m: Message):
+    rows = c.execute(
+        "SELECT user_id,rp FROM rank_stats WHERE chat_id=? ORDER BY rp DESC LIMIT 10", (m.chat.id,)
+    ).fetchall()
+    if not rows:
+        return await m.reply("📭 هنوز کسی تو این گروه دوئل نزده!")
+    txt = "🏆 برترین‌های رنک این گروه\n\n"
+    for i, (uid, rp) in enumerate(rows, 1):
+        name = get_name(m.chat.id, uid)
+        txt += f"{i}. {name} — {rp} RP ({get_rank_tier(rp)})\n"
+    await m.reply(txt)
+
+# ===== Dicko of the Day (رای‌گیری روزانه) =====
+DICKO_DAILY_LIMIT = 2      # چند بار در روز میشه این رای‌گیری رو برگزار کرد
+DICKO_VOTE_SECONDS = 300   # مدت زمان باز بودن رای‌گیری (۵ دقیقه)
+DICKO_PRIZE = 50           # جایزه‌ی سانت برای برنده
+DICKO_MAX_CANDIDATES = 10  # حداکثر تعداد گزینه‌ها تو دکمه‌ها
+
+@dp.message(Command("dicko"))
+async def dicko_start(m: Message):
+    if m.chat.type == "private":
+        return await m.reply("❌ این دستور فقط تو گروه کار می‌کنه.")
+    today = today_str()
+    row = c.execute("SELECT count FROM dicko_daily WHERE chat_id=? AND day=?", (m.chat.id, today)).fetchone()
+    used = row[0] if row else 0
+    if used >= DICKO_DAILY_LIMIT:
+        return await m.reply(f"❌ رای‌گیری Dicko of the Day امروز {DICKO_DAILY_LIMIT} بار برگزار شده، فردا دوباره امتحان کن!")
+    candidates = c.execute(
+        "SELECT user_id,name FROM users WHERE chat_id=? ORDER BY size DESC LIMIT ?",
+        (m.chat.id, DICKO_MAX_CANDIDATES)
+    ).fetchall()
+    if len(candidates) < 2:
+        return await m.reply("❌ به‌اندازه‌ی کافی بازیکن تو این گروه فعالیت نکرده تا رای‌گیری برگزار بشه.")
+    cur = c.execute("INSERT INTO dicko_sessions(chat_id,active,created_at) VALUES(?,1,?)", (m.chat.id, int(time.time())))
+    if row:
+        c.execute("UPDATE dicko_daily SET count=count+1 WHERE chat_id=? AND day=?", (m.chat.id, today))
+    else:
+        c.execute("INSERT INTO dicko_daily(chat_id,day,count) VALUES(?,?,1)", (m.chat.id, today))
+    db.commit()
+    sid = cur.lastrowid
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=name, callback_data=f"dickovote:{sid}:{uid}")]
+        for uid, name in candidates
+    ])
+    minutes = DICKO_VOTE_SECONDS // 60
+    sent = await m.reply(
+        f"🍆 Dicko of the Day شروع شد!\n\n"
+        f"رای بدید کدومتون امروز «Dicko» گروهه!\n"
+        f"🏆 برنده {DICKO_PRIZE} سانت می‌گیره.\n"
+        f"⏳ {minutes} دقیقه وقت دارید رای بدید. (دفعه‌ی {used+1} از {DICKO_DAILY_LIMIT} امروز)",
+        reply_markup=kb
+    )
+    asyncio.create_task(dicko_close_later(m.bot, sid, m.chat.id, sent.message_id))
+
+@dp.callback_query(F.data.startswith("dickovote:"))
+async def dicko_vote(q: CallbackQuery):
+    _, sid, cand = q.data.split(":")
+    sid = int(sid); cand = int(cand)
+    row = c.execute("SELECT active FROM dicko_sessions WHERE id=?", (sid,)).fetchone()
+    if not row or row[0] == 0:
+        return await q.answer("⌛️ این رای‌گیری تموم شده!", show_alert=True)
+    c.execute(
+        "INSERT INTO dicko_votes(session_id,voter_id,candidate_id) VALUES(?,?,?) "
+        "ON CONFLICT(session_id,voter_id) DO UPDATE SET candidate_id=excluded.candidate_id",
+        (sid, q.from_user.id, cand)
+    )
+    db.commit()
+    await q.answer("✅ رایت ثبت شد!")
+
+async def dicko_close_later(bot, sid, chat_id, msg_id):
+    await asyncio.sleep(DICKO_VOTE_SECONDS)
+    row = c.execute("SELECT active FROM dicko_sessions WHERE id=?", (sid,)).fetchone()
+    if not row or row[0] == 0:
+        return
+    results = c.execute(
+        "SELECT candidate_id, COUNT(*) c FROM dicko_votes WHERE session_id=? GROUP BY candidate_id ORDER BY c DESC",
+        (sid,)
+    ).fetchall()
+    c.execute("UPDATE dicko_sessions SET active=0 WHERE id=?", (sid,))
+    db.commit()
+    if not results:
+        try:
+            await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text="🍆 Dicko of the Day\n\n😶 کسی رای نداد، این دور بدون برنده تموم شد.")
+        except Exception:
+            pass
+        return
+    top_votes = results[0][1]
+    winners = [uid for uid, cnt in results if cnt == top_votes]
+    winner = random.choice(winners)
+    c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (DICKO_PRIZE, chat_id, winner))
+    db.commit()
+    winner_name = get_name(chat_id, winner)
+    txt = "🍆 نتیجه‌ی Dicko of the Day!\n\n"
+    for uid, cnt in results[:10]:
+        n = get_name(chat_id, uid)
+        crown = "👑 " if uid == winner else ""
+        txt += f"{crown}{n}: {cnt} رای\n"
+    txt += f"\n🏆 Dicko امروز: {winner_name}! (+{DICKO_PRIZE} سانت)"
+    try:
+        await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=txt)
+    except Exception:
+        pass
+
 @dp.message(Command("pvp"))
 async def pvp(m:Message):
     try: bet=int(m.text.split()[1])
@@ -240,14 +477,22 @@ async def accept(q:CallbackQuery):
     s1=get_size(chat_id,creator)
     s2=get_size(chat_id,q.from_user.id)
     if s1<bet or s2<bet: return await q.answer("Not enough cm")
-    winner=random.choice([creator,q.from_user.id])
-    loser=q.from_user.id if winner==creator else creator
+    opponent = q.from_user.id
+    wr_creator, _ = get_pvp_winrate(chat_id, creator)
+    wr_opponent, _ = get_pvp_winrate(chat_id, opponent)
+    # هرکی نرخ بردش بالاتر از 50٪ باشه شانسش کم می‌شه، هرکی پایین‌تره شانسش زیاد می‌شه
+    p_creator = 0.5 + PVP_BALANCE_STRENGTH * (wr_opponent - wr_creator)
+    p_creator = max(PVP_PROB_MIN, min(PVP_PROB_MAX, p_creator))
+    winner = creator if random.random() < p_creator else opponent
+    loser = opponent if winner == creator else creator
+    bump_pvp_stats(chat_id, winner, loser)
+    record_rank_duel(chat_id, winner, loser)
     c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?",(bet,chat_id,winner))
     c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?",(bet,chat_id,loser))
     c.execute("UPDATE battles SET active=0 WHERE id=?",(bid,))
     db.commit()
     winner_name=get_name(chat_id,winner)
-    await q.message.edit_text(f"🏆 پایان دوئل!\n\n👑 برنده: {winner_name}\n💰 جایزه: {bet} سانت\n\n😂 بازنده باید بیشتر تمرین کنه!")
+    await q.message.edit_text(f"🏆 پایان دوئل!\n\n👑 برنده: {winner_name}\n💰 جایزه: {bet} سانت\n🏅 +{RANK_WIN_RP} RP برنده | -{RANK_LOSS_RP} RP بازنده\n\n😂 بازنده باید بیشتر تمرین کنه!")
 
 
 # ===== Mafia Team PvP System =====
@@ -1182,6 +1427,24 @@ async def addcm(m:Message):
     new_size = get_size(m.chat.id, target)
     await m.reply(f"✅ {amount} سانت به {m.reply_to_message.from_user.full_name} اضافه شد!\n📏 اندازه جدید: {new_size} سانت")
 
+@dp.message(Command("addsperm"))
+async def addsperm(m:Message):
+    if m.from_user.id != ADMIN_ID:
+        return await m.reply("❌ دسترسی ندارید!")
+    try:
+        parts = m.text.split()
+        amount = int(parts[1])
+    except:
+        return await m.reply("Usage: /addsperm [amount] (reply to a user)")
+    if not m.reply_to_message:
+        return await m.reply("Reply to a user to add sperm.")
+    target = m.reply_to_message.from_user.id
+    user(m.chat.id, target, m.reply_to_message.from_user.full_name)
+    c.execute("UPDATE users SET sperm=sperm+? WHERE chat_id=? AND user_id=?", (amount, m.chat.id, target))
+    db.commit()
+    new_sperm = get_sperm(m.chat.id, target)
+    await m.reply(f"✅ {amount} اسپرم به {m.reply_to_message.from_user.full_name} اضافه شد!\n🧬 اسپرم جدید: {new_sperm}")
+
 
 @dp.message(Command("addcb"))
 async def addcb(m:Message):
@@ -1233,7 +1496,7 @@ COMPANY_COOLDOWN = 0                # محدودیت زمانی باز کردن 
 COMPANY_MIN_INVEST_PCT = 0.10       # کف سرمایه‌گذاری هر نفر توی هر بار /invest: ۱۰٪ سایزش (نه سقف!)
 COMPANY_MIN_BUDGET_LOW = 5          # پایین‌ترین مقدار ممکن برای حداقل بودجه‌ی یه شرکت
 COMPANY_MIN_BUDGET_HIGH = 15        # بالاترین مقدار ممکن برای حداقل بودجه‌ی یه شرکت
-COMPANY_DIVIDEND_PCT = 0.10         # سود روزانه‌ی شرکت به صاحبش
+COMPANY_DIVIDEND_PCT = 0.20         # سود روزانه‌ی شرکت به صاحبش
 COMPANY_WORKER_COST = 15            # قیمت خرید هر یار مافیا از شرکت
 
 COMPANY_NAME_POOL = [
@@ -1514,7 +1777,47 @@ async def my_companies(m: Message):
     await m.reply(txt)
 
 
-@dp.message(Command("hire"))
+# ===== رنک بورس بر اساس ارزش خالص شرکت‌ها =====
+BOURSE_RANK_TIERS = [
+    (0,    "🥫 دستفروش"),
+    (50,   "🏪 مغازه‌دار"),
+    (150,  "🏢 تاجر"),
+    (400,  "🏦 میلیاردر"),
+    (800,  "🚀 ایلان ماسک"),
+]
+
+def get_bourse_tier(net_worth):
+    tier = BOURSE_RANK_TIERS[0][1]
+    for threshold, name in BOURSE_RANK_TIERS:
+        if net_worth >= threshold:
+            tier = name
+    return tier
+
+@dp.message(Command("bourseleader"))
+async def bourse_leaderboard(m: Message):
+    rows = c.execute(
+        "SELECT owner_id, "
+        "COALESCE(SUM(CASE WHEN value>0 THEN value ELSE 0 END),0) AS net_worth, "
+        "SUM(CASE WHEN value>0 THEN 1 ELSE 0 END) AS companies, "
+        "COUNT(*) AS wins "
+        "FROM owned_companies WHERE chat_id=? GROUP BY owner_id ORDER BY net_worth DESC LIMIT 10",
+        (m.chat.id,)
+    ).fetchall()
+    if not rows:
+        return await m.reply("📭 هنوز کسی تو بورس این گروه برنده نشده!")
+    txt = "📊 جدول بورس این گروه\n\n"
+    for i, (owner_id, net_worth, companies, wins) in enumerate(rows, 1):
+        name = get_name(m.chat.id, owner_id)
+        tier = get_bourse_tier(net_worth)
+        txt += (
+            f"{i}. {name}\n"
+            f"   {tier}\n"
+            f"   🧬 ارزش خالص: {net_worth} اسپرم | 🏢 شرکت‌های فعال: {companies} | 🏆 کل بردها: {wins}\n\n"
+        )
+    await m.reply(txt)
+
+
+
 async def hire_worker(m: Message):
     try:
         cid = int(m.text.split()[1])
@@ -1609,6 +1912,9 @@ async def main():
     commands = [
         BotCommand(command="grow", description="🌱 رشد کن"),
         BotCommand(command="size", description="📊 اندازه و پروفایل"),
+        BotCommand(command="rank", description="🏅 رنک و پیشرفت روزانه"),
+        BotCommand(command="ranktop", description="🏆 برترین‌های رنک گروه"),
+        BotCommand(command="dicko", description="🍆 Dicko of the Day (رای‌گیری، ۲ بار در روز)"),
         BotCommand(command="tosperm", description="🧬 تبدیل سانت به اسپرم"),
         BotCommand(command="tocent", description="💰 تبدیل اسپرم به سانت"),
         BotCommand(command="top", description="🏆 جدول بزرگان"),
@@ -1631,10 +1937,12 @@ async def main():
         BotCommand(command="invest", description="💰 سرمایه‌گذاری روی یه کمپانی"),
         BotCommand(command="cclose", description="📉 بستن بازار و اعلام برنده (ادمین)"),
         BotCommand(command="mycompanies", description="🏢 کمپانی‌های من"),
+        BotCommand(command="bourseleader", description="📊 جدول رنک بورس گروه"),
         BotCommand(command="hire", description="🔫 خرید یار برای کمپانی"),
         BotCommand(command="useyar", description="🕵️ فرستادن یار به نبرد مافیای فعلیت"),
         BotCommand(command="cashout", description="💸 نقد کردن نصف ارزش کمپانی"),
         BotCommand(command="addcm", description="➕ افزودن سانت به کاربر (ادمین)"),
+        BotCommand(command="addsperm", description="➕ افزودن اسپرم به کاربر (ادمین)"),
         BotCommand(command="addcb", description="👑 دادن/گرفتن سلبریتی از کاربر (ادمین)"),
         BotCommand(command="getfileid", description="🆔 گرفتن file_id عکس (ادمین)"),
     ]
