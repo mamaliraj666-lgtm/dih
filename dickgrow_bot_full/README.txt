@@ -1,0 +1,1 @@
+Set BOT_TOKEN on Railway and deploy.
