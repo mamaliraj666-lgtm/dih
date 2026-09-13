@@ -860,7 +860,6 @@ CELEBS = {
     "Ashlyn Castro": ("B",300,150,"AgACAgQAAxkBAAEiiypqpr2gKFikU1gkAAFPisEKVaAKA5oAAvQPaxsR1jhRLB-aZnzbFkIBAAMCAANtAAM9BA"),
     "Kristen Stewart": ("B",300,150,"AgACAgQAAxkBAAEiLHxqlZSorrGyLnSOBdRqRqdnSvnaXgACDxBrG8igqVDQHpTLZKuoOwEAAwIAA3MAAz0E"),
     "Olivia Cooke": ("A",200,150,"AgACAgQAAxkBAAEiLFBqlZC2pdCvovgiG6aqLJwG7oNBHAAC_w9rG8igqVC9yhxFuB9gDQEAAwIAA3MAAz0E"),
-    "Scarlett Johansson": ("A",200,150,"https://i.postimg.cc/rmT2mSRG/download-(7).jpg"),
     "Sabrina Carpenter": ("B",200,100,"AgACAgQAAxkBAAEiLGxqlZJxN_AeZTfMK1e_iZUiC4tvaAACBxBrG8igqVD1mfDtce21cAEAAwIAA3MAAz0E"),
     "Dua Lipa": ("A",200,150,"AgACAgQAAxkBAAEiLIRqlZW2x2U46kRw5iGd8GMcDrH5xAACFxBrG8igqVBqy7bfQ8pbLgEAAwIAA3MAAz0E"),
     "Sophie Tatcher": ("A",200,150,"AgACAgQAAxkBAAEiLExqlZBP5UH5p9rTTAUQ6hv3_mUpkAAC_g9rG8igqVABEzpZosgbbAEAAwIAA3MAAz0E"),
