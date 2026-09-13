@@ -820,30 +820,30 @@ db.commit()
 
 
 CELEBS = {
-    "Jenny Kitty": ("PH",250,200,"AgACAgQAAxkBAAEii1tqpsVgDm25Nn44iH4e6bjwlTu2DQACAhBrGxHWOFF506Hdb2bopwEAAwIAA3MAAz0E"),
-    "Eva Elfie": ("PH",250,200,"AgACAgQAAxkBAAEii1FqpsQmac1sr7zDK5Xt_G_FbeOM7AACARBrGxHWOFFJWAjEYvCMBwEAAwIAA3MAAz0E"),
-    "Eden Ivy": ("PH",250,200,"AgACAgQAAxkBAAEiiz1qpsBXkEms6B3T44r1Dq3-vTr3VgAC-A9rGxHWOFHl3QmBAqfzCQEAAwIAA3MAAz0E"),
-    "Ana Stangle": ("PH",250,200,"AgACAgQAAxkBAAEiixhqprxb_z1tsYNO_q36AAFG7bhvcrcAAu8PaxsR1jhR-H1AmjEhOykBAAMCAANtAAM9BA"),
-    "Ana Stangle": ("PH",250,200,"AgACAgQAAxkBAAEiixhqprxb_z1tsYNO_q36AAFG7bhvcrcAAu8PaxsR1jhR-H1AmjEhOykBAAMCAANtAAM9BA"),
-    "Polly Yangs": ("PH",250,200,"AgACAgQAAxkBAAEiixZqprwWMSc06gjR6Wf1AfjEMS-bYgAC7g9rGxHWOFF1rqHV_XmcqQEAAwIAA3MAAz0E"),
-    "Mia Malkova": ("PH",250,200,"AgACAgQAAxkBAAEiixJqprvaxcqdkRMMLmDFpVVVJ22ycwAC7Q9rGxHWOFHDv3vxo0jSfAEAAwIAA3MAAz0E"),
-    "Lyli Philips": ("PH",250,200,"AgACAgQAAxkBAAEiiwpqpruE7F2IrBlMo2Z7kJ7-iGC3hgAC6g9rGxHWOFEDhS0dv-NIdQEAAwIAA3MAAz0E"),
-    "Remida": ("PH",250,200,"AgACAgQAAxkBAAEiiwZqprtRYUg6S4AaVWga3nd9oplYegAC6Q9rGxHWOFELW3Aa_kVp9QEAAwIAA3MAAz0E"),
-    "Lily Lou": ("PH",250,200,"AgACAgQAAxkBAAEiiv5qprr3COm1SOlfeWjvRoU-Dmz9AgAC6A9rGxHWOFFkcd5sl-uEqwEAAwIAA3MAAz0E"),
-    "Lena Paul": ("PH",250,200,"AgACAgQAAxkBAAEiivZqprk0NUKUAwABNROBmv06cviy35UAAvgVaxs3EDhR-L2oRxHNDegBAAMCAANzAAM9BA"),
-    "Angela White": ("PH",250,200,"AgACAgQAAxkBAAEiK8tqlX0p5xvvc7RkL8yCDK50C70cMAAC3hBrG4IDsFBEhOBKjPVnEgEAAwIAA3MAAz0E"),
-    "Comatozze": ("PH",250,200,"AgACAgQAAxkBAAEiK99qlYOdZfkvzeW8xB9yg8ay0a5E0AAC4w9rG8igqVDkAAH7iUzCMUoBAAMCAANzAAM9BA"),
-    "Sweetie Fox": ("PH",250,200,"AgACAgQAAxkBAAEiK-NqlYTmIgPdooRd2A-cfBNbZIDWDwAC5g9rG8igqVDv7lHTLO7LEgEAAwIAA3MAAz0E"),
-    "Diana Rider": ("PH",250,200,"AgACAgQAAxkBAAEiiyZqpr0Z6wHI0orDFTTA0FpqPDKxcgAC8g9rGxHWOFEEh3EQeHYcWwEAAwIAA3MAAz0E"),
-    "Lana Rhoades": ("PH",250,200,"AgACAgQAAxkBAAEiK-dqlYZjT3rDHHtNt5EPHZTb_o70xwAC6A9rG8igqVCMQM6VNiWu-wEAAwIAA3MAAz0E"),
-    "Ana de Armas": ("S",300,150,"AgACAgQAAxkBAAEiLBRqlYks3xjU5rQCkNXypUQOoS9n3QAC7w9rG8igqVAhpyUv1rvdmwEAAwIAA3MAAz0E"),
-    "Kylie Jenner": ("S",300,150,"AgACAgQAAxkBAAEii0NqpsFgJgN8lSjVTyiKBQanxRUV7AAC_Q9rGxHWOFHpMFeQR7I8fQEAAwIAA3MAAz0E"),
-    "Sydney Sweeney": ("S",300,150,"AgACAgQAAxkBAAEii0tqpsL7OwOzbu-UicheoiKjfQGvEgAC_w9rGxHWOFEfc0vRD4_BvAEAAwIAA3MAAz0E"),
-    "Pinkchyu": ("S",300,150,"AgACAgQAAxkBAAEiiz9qpsDeoCCTvNfIyfhp_0DLu6md9gAC-g9rGxHWOFEwehVusIFDyAEAAwIAA3MAAz0E"),
-    "Georgina Rodriguez": ("S",300,150,"AgACAgQAAxkBAAEii0FqpsEls89dT1QptHWD0jEdIhaOXQAC_A9rGxHWOFGfJx1nk0t_GAEAAwIAA3MAAz0E"),
-    "Madison Beer": ("A",300,150,"AgACAgQAAxkBAAEiix5qpry4N-XRCC1BeUeGrBacwO1PxwAC8Q9rGxHWOFEiXTj03FeFEAEAAwIAA3MAAz0E"),
-    "Sadie Sink": ("A",300,150,"AgACAgQAAxkBAAEiLFJqlZEGt1mG9G15PgKP4PPhQcRm-gACARBrG8igqVCvW3ZnrKAGywEAAwIAA3MAAz0E"),
-    "Scarlett Johansson": ("A",300,150,"AgACAgQAAxkBAAEiizRqpr6LqelgQgABMJSCH4voJHFvKsAAAvcPaxsR1jhRIOR5fA8duesBAAMCAANtAAM9BA"),
+    "Jenny Kitty": ("PH",360,300,"AgACAgQAAxkBAAEii1tqpsVgDm25Nn44iH4e6bjwlTu2DQACAhBrGxHWOFF506Hdb2bopwEAAwIAA3MAAz0E"),
+    "Eva Elfie": ("PH",360,300,"AgACAgQAAxkBAAEii1FqpsQmac1sr7zDK5Xt_G_FbeOM7AACARBrGxHWOFFJWAjEYvCMBwEAAwIAA3MAAz0E"),
+    "Eden Ivy": ("PH",360,300,"AgACAgQAAxkBAAEiiz1qpsBXkEms6B3T44r1Dq3-vTr3VgAC-A9rGxHWOFHl3QmBAqfzCQEAAwIAA3MAAz0E"),
+    "Ana Stangle": ("PH",360,300,"AgACAgQAAxkBAAEiixhqprxb_z1tsYNO_q36AAFG7bhvcrcAAu8PaxsR1jhR-H1AmjEhOykBAAMCAANtAAM9BA"),
+    "Ana Stangle": ("PH",360,300,"AgACAgQAAxkBAAEiixhqprxb_z1tsYNO_q36AAFG7bhvcrcAAu8PaxsR1jhR-H1AmjEhOykBAAMCAANtAAM9BA"),
+    "Polly Yangs": ("PH",360,300,"AgACAgQAAxkBAAEiixZqprwWMSc06gjR6Wf1AfjEMS-bYgAC7g9rGxHWOFF1rqHV_XmcqQEAAwIAA3MAAz0E"),
+    "Mia Malkova": ("PH",360,300,"AgACAgQAAxkBAAEiixJqprvaxcqdkRMMLmDFpVVVJ22ycwAC7Q9rGxHWOFHDv3vxo0jSfAEAAwIAA3MAAz0E"),
+    "Lyli Philips": ("PH",360,300,"AgACAgQAAxkBAAEiiwpqpruE7F2IrBlMo2Z7kJ7-iGC3hgAC6g9rGxHWOFEDhS0dv-NIdQEAAwIAA3MAAz0E"),
+    "Remida": ("PH",360,300,"AgACAgQAAxkBAAEiiwZqprtRYUg6S4AaVWga3nd9oplYegAC6Q9rGxHWOFELW3Aa_kVp9QEAAwIAA3MAAz0E"),
+    "Lily Lou": ("PH",360,300,"AgACAgQAAxkBAAEiiv5qprr3COm1SOlfeWjvRoU-Dmz9AgAC6A9rGxHWOFFkcd5sl-uEqwEAAwIAA3MAAz0E"),
+    "Lena Paul": ("PH",360,300,"AgACAgQAAxkBAAEiivZqprk0NUKUAwABNROBmv06cviy35UAAvgVaxs3EDhR-L2oRxHNDegBAAMCAANzAAM9BA"),
+    "Angela White": ("PH",360,300,"AgACAgQAAxkBAAEiK8tqlX0p5xvvc7RkL8yCDK50C70cMAAC3hBrG4IDsFBEhOBKjPVnEgEAAwIAA3MAAz0E"),
+    "Comatozze": ("PH",360,300,"AgACAgQAAxkBAAEiK99qlYOdZfkvzeW8xB9yg8ay0a5E0AAC4w9rG8igqVDkAAH7iUzCMUoBAAMCAANzAAM9BA"),
+    "Sweetie Fox": ("PH",360,300,"AgACAgQAAxkBAAEiK-NqlYTmIgPdooRd2A-cfBNbZIDWDwAC5g9rG8igqVDv7lHTLO7LEgEAAwIAA3MAAz0E"),
+    "Diana Rider": ("PH",360,300,"AgACAgQAAxkBAAEiiyZqpr0Z6wHI0orDFTTA0FpqPDKxcgAC8g9rGxHWOFEEh3EQeHYcWwEAAwIAA3MAAz0E"),
+    "Lana Rhoades": ("PH",360,300,"AgACAgQAAxkBAAEiK-dqlYZjT3rDHHtNt5EPHZTb_o70xwAC6A9rG8igqVCMQM6VNiWu-wEAAwIAA3MAAz0E"),
+    "Ana de Armas": ("S",310,250,"AgACAgQAAxkBAAEiLBRqlYks3xjU5rQCkNXypUQOoS9n3QAC7w9rG8igqVAhpyUv1rvdmwEAAwIAA3MAAz0E"),
+    "Kylie Jenner": ("S",310,250,"AgACAgQAAxkBAAEii0NqpsFgJgN8lSjVTyiKBQanxRUV7AAC_Q9rGxHWOFHpMFeQR7I8fQEAAwIAA3MAAz0E"),
+    "Sydney Sweeney": ("S",310,250,"AgACAgQAAxkBAAEii0tqpsL7OwOzbu-UicheoiKjfQGvEgAC_w9rGxHWOFEfc0vRD4_BvAEAAwIAA3MAAz0E"),
+    "Pinkchyu": ("S",310,250,"AgACAgQAAxkBAAEiiz9qpsDeoCCTvNfIyfhp_0DLu6md9gAC-g9rGxHWOFEwehVusIFDyAEAAwIAA3MAAz0E"),
+    "Georgina Rodriguez": ("S",310,250,"AgACAgQAAxkBAAEii0FqpsEls89dT1QptHWD0jEdIhaOXQAC_A9rGxHWOFGfJx1nk0t_GAEAAwIAA3MAAz0E"),
+    "Madison Beer": ("A",200,150,"AgACAgQAAxkBAAEiix5qpry4N-XRCC1BeUeGrBacwO1PxwAC8Q9rGxHWOFEiXTj03FeFEAEAAwIAA3MAAz0E"),
+    "Sadie Sink": ("A",200,150,"AgACAgQAAxkBAAEiLFJqlZEGt1mG9G15PgKP4PPhQcRm-gACARBrG8igqVCvW3ZnrKAGywEAAwIAA3MAAz0E"),
+    "Scarlett Johansson": ("A",200,150,"AgACAgQAAxkBAAEiizRqpr6LqelgQgABMJSCH4voJHFvKsAAAvcPaxsR1jhRIOR5fA8duesBAAMCAANtAAM9BA"),
     "Anne Hathaway": ("B",300,150,"AgACAgQAAxkBAAEiLHJqlZLNXRVWSN-k7xu-doS7FTDsbgACCRBrG8igqVDk8fgU3uXUFwEAAwIAA3MAAz0E"),
     "Elizabeth Olsen": ("B",300,150,"AgACAgQAAxkBAAEiLHRqlZNem1Ue0rp7IJ182xumcv2XKwACChBrG8igqVDyu9zwySffJAEAAwIAA3MAAz0E"),
     "Olivia Rodrigo": ("B",300,150,"AgACAgQAAxkBAAEiLHZqlZPReBV1oF2fHUcz1MiKfWTuPAACCxBrG8igqVDsVdcPA4GFUAEAAwIAA3MAAz0E"),
@@ -851,12 +851,12 @@ CELEBS = {
     "Leah Halton": ("B",300,150,"AgACAgQAAxkBAAEiiyhqpr1II4KnLYGLp4wwWO25ZUjnMwAC8w9rGxHWOFHnxgG03-TRhAEAAwIAA3MAAz0E"),
     "Ashlyn Castro": ("B",300,150,"AgACAgQAAxkBAAEiiypqpr2gKFikU1gkAAFPisEKVaAKA5oAAvQPaxsR1jhRLB-aZnzbFkIBAAMCAANtAAM9BA"),
     "Kristen Stewart": ("B",300,150,"AgACAgQAAxkBAAEiLHxqlZSorrGyLnSOBdRqRqdnSvnaXgACDxBrG8igqVDQHpTLZKuoOwEAAwIAA3MAAz0E"),
-    "Olivia Cooke": ("A",200,100,"AgACAgQAAxkBAAEiLFBqlZC2pdCvovgiG6aqLJwG7oNBHAAC_w9rG8igqVC9yhxFuB9gDQEAAwIAA3MAAz0E"),
-    "Scarlett Johansson": ("A",200,100,"https://i.postimg.cc/rmT2mSRG/download-(7).jpg"),
+    "Olivia Cooke": ("A",200,150,"AgACAgQAAxkBAAEiLFBqlZC2pdCvovgiG6aqLJwG7oNBHAAC_w9rG8igqVC9yhxFuB9gDQEAAwIAA3MAAz0E"),
+    "Scarlett Johansson": ("A",200,150,"https://i.postimg.cc/rmT2mSRG/download-(7).jpg"),
     "Sabrina Carpenter": ("B",200,100,"AgACAgQAAxkBAAEiLGxqlZJxN_AeZTfMK1e_iZUiC4tvaAACBxBrG8igqVD1mfDtce21cAEAAwIAA3MAAz0E"),
-    "Dua Lipa": ("A",100,50,"AgACAgQAAxkBAAEiLIRqlZW2x2U46kRw5iGd8GMcDrH5xAACFxBrG8igqVBqy7bfQ8pbLgEAAwIAA3MAAz0E"),
-    "Sophie Tatcher": ("A",100,50,"AgACAgQAAxkBAAEiLExqlZBP5UH5p9rTTAUQ6hv3_mUpkAAC_g9rG8igqVABEzpZosgbbAEAAwIAA3MAAz0E"),
-    "Billie Eilish": ("S",100,50,"AgACAgQAAxkBAAEii01qpsO9jfgwqGNaCOuxcDI2B_tolAACLRFrG-cKCVH7fF__m9zGrQEAAwIAA3MAAz0E"),
+    "Dua Lipa": ("A",200,150,"AgACAgQAAxkBAAEiLIRqlZW2x2U46kRw5iGd8GMcDrH5xAACFxBrG8igqVBqy7bfQ8pbLgEAAwIAA3MAAz0E"),
+    "Sophie Tatcher": ("A",200,150,"AgACAgQAAxkBAAEiLExqlZBP5UH5p9rTTAUQ6hv3_mUpkAAC_g9rG8igqVABEzpZosgbbAEAAwIAA3MAAz0E"),
+    "Billie Eilish": ("S",310,250,"AgACAgQAAxkBAAEii01qpsO9jfgwqGNaCOuxcDI2B_tolAACLRFrG-cKCVH7fF__m9zGrQEAAwIAA3MAAz0E"),
     "Folorance Pugh": ("B",100,50,"AgACAgQAAxkBAAEiizBqpr485700NYU6jwetz6qFBbBYrgAC9g9rGxHWOFFkMl6wX7RergEAAwIAA3MAAz0E"),
 }
 
@@ -873,7 +873,7 @@ TIER_LABELS = {
     "B": "🥉 Tier B",
     "PH": "💎 Tier PH",
 }
-TIER_PRICES = {"S": (300, 150), "A": (200, 100), "B": (100, 50), "PH": (250, 200)}
+TIER_PRICES = {"S": (310, 250), "A": (200, 150), "B": (100, 50), "PH": (360, 300)}
 
 def build_market_caption(tier, page):
     celebs = TIER_CELEBS[tier]
@@ -1149,7 +1149,7 @@ async def spin(m:Message):
     except:
         return await m.reply("استفاده: /spin s | a | b")
 
-    prices={"S":150,"A":100,"B":50,"PH":200}
+    prices={"S":250,"A":150,"B":50,"PH":300}
 
     if tier not in prices:
         return await m.reply("Tier باید s یا a یا b باشد.")
@@ -1329,14 +1329,17 @@ async def sell(m:Message):
     db.commit()
     await m.reply(f"💸 فروش موفق!\n\n👑 {name}\n💰 {paid} سانت به حسابت اضافه شد!")
 
+LOCK_COSTS = {"PH": 75, "S": 60, "A": 50, "B": 25}
+
 @dp.message(Command("lock"))
 async def lock_celeb(m:Message):
     name = strip_command(m.text)
     if name not in CELEBS:
         return await m.reply("❌ سلبریتی پیدا نشد.")
     tier_key = CELEBS[name][0]
-    if tier_key not in ("B", "PH"):
-        return await m.reply("❌ فقط سلبریتی‌های Tier B و PH نیاز به قفل دارن!")
+    if tier_key not in LOCK_COSTS:
+        return await m.reply("❌ این سلبریتی نیاز به قفل نداره!")
+    lock_cost = LOCK_COSTS[tier_key]
     user(m.chat.id, m.from_user.id, m.from_user.full_name)
     owned = c.execute("SELECT locked FROM collections WHERE chat_id=? AND user_id=? AND celeb=?", (m.chat.id, m.from_user.id, name)).fetchone()
     if not owned:
@@ -1344,12 +1347,12 @@ async def lock_celeb(m:Message):
     if owned[0] == 1:
         return await m.reply("🔒 این سلبریتی قبلاً قفله!")
     size = get_size(m.chat.id, m.from_user.id)
-    if size < 25:
-        return await m.reply("❌ برای قفل کردن به ۲۵ سانت نیاز داری!")
-    c.execute("UPDATE users SET size=size-25 WHERE chat_id=? AND user_id=?", (m.chat.id, m.from_user.id))
+    if size < lock_cost:
+        return await m.reply(f"❌ برای قفل کردن به {lock_cost} سانت نیاز داری!")
+    c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (lock_cost, m.chat.id, m.from_user.id))
     c.execute("UPDATE collections SET locked=1 WHERE chat_id=? AND user_id=? AND celeb=?", (m.chat.id, m.from_user.id, name))
     db.commit()
-    await m.reply(f"🔒 {name} قفل شد!\n\n💰 ۲۵ سانت کسر شد.\nحالا کسی دیگه نمیتونه این سلبریتی رو بخره.")
+    await m.reply(f"🔒 {name} قفل شد!\n\n💰 {lock_cost} سانت کسر شد.\nحالا کسی دیگه نمیتونه این سلبریتی رو بخره.")
 
 @dp.message(Command("gloan"))
 async def gloan(m:Message):
@@ -2081,7 +2084,7 @@ async def main():
         BotCommand(command="addcm", description="➕ افزودن سانت به کاربر (ادمین)"),
         BotCommand(command="addsperm", description="➕ افزودن اسپرم به کاربر (ادمین)"),
         BotCommand(command="addcb", description="👑 دادن/گرفتن سلبریتی از کاربر (ادمین)"),
-        BotCommand(command="getfileid", description="🆔 گرفتن file_id عکس  (ادمین)"),
+        BotCommand(command="getfileid", description="🆔 گرفتن file_id عکس (ادمین)"),
     ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
     await bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats())
