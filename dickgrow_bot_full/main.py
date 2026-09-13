@@ -416,6 +416,8 @@ async def dicko_vote(q: CallbackQuery):
     row = c.execute("SELECT active FROM dicko_sessions WHERE id=?", (sid,)).fetchone()
     if not row or row[0] == 0:
         return await q.answer("⌛️ این رای‌گیری تموم شده!", show_alert=True)
+    if q.from_user.id == cand:
+        return await q.answer("❌ نمیتونی به خودت رای بدی!", show_alert=True)
     c.execute(
         "INSERT INTO dicko_votes(session_id,voter_id,candidate_id) VALUES(?,?,?) "
         "ON CONFLICT(session_id,voter_id) DO UPDATE SET candidate_id=excluded.candidate_id",
@@ -443,16 +445,21 @@ async def dicko_close_later(bot, sid, chat_id, msg_id):
         return
     top_votes = results[0][1]
     winners = [uid for uid, cnt in results if cnt == top_votes]
-    winner = random.choice(winners)
-    c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (DICKO_PRIZE, chat_id, winner))
+    share = DICKO_PRIZE // len(winners)
+    for uid in winners:
+        c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (share, chat_id, uid))
     db.commit()
-    winner_name = get_name(chat_id, winner)
     txt = "🍆 نتیجه‌ی Dicko of the Day!\n\n"
     for uid, cnt in results[:10]:
         n = get_name(chat_id, uid)
-        crown = "👑 " if uid == winner else ""
+        crown = "👑 " if uid in winners else ""
         txt += f"{crown}{n}: {cnt} رای\n"
-    txt += f"\n🏆 Dicko امروز: {winner_name}! (+{DICKO_PRIZE} سانت)"
+    if len(winners) > 1:
+        winner_names = "، ".join(get_name(chat_id, uid) for uid in winners)
+        txt += f"\n🏆 مساوی شد! Dicko امروز: {winner_names}! (هرکدوم +{share} سانت)"
+    else:
+        winner_name = get_name(chat_id, winners[0])
+        txt += f"\n🏆 Dicko امروز: {winner_name}! (+{share} سانت)"
     try:
         await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=txt)
     except Exception:
@@ -2064,7 +2071,7 @@ async def main():
         BotCommand(command="list", description="🏪 فروش به دیگران"),
         BotCommand(command="lock", description="🔒 قفل کردن سلبریتی"),
         BotCommand(command="pvp", description="⚔️ دوئل"),
-        BotCommand(command="mafia", description="🔫  جنگ مافیا تیمی"),
+        BotCommand(command="mafia", description="🔫 جنگ مافیا تیمی"),
         BotCommand(command="mafia2", description="🔫 مافیا (فاش‌شدن تیم‌ها در پایان)"),
         BotCommand(command="loan", description="💰 وام دادن"),
         BotCommand(command="repay", description="✅ پرداخت بدهی"),
