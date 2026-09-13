@@ -2064,7 +2064,7 @@ async def main():
         BotCommand(command="list", description="🏪 فروش به دیگران"),
         BotCommand(command="lock", description="🔒 قفل کردن سلبریتی"),
         BotCommand(command="pvp", description="⚔️ دوئل"),
-        BotCommand(command="mafia", description="🔫 جنگ مافیا تیمی"),
+        BotCommand(command="mafia", description="🔫  جنگ مافیا تیمی"),
         BotCommand(command="mafia2", description="🔫 مافیا (فاش‌شدن تیم‌ها در پایان)"),
         BotCommand(command="loan", description="💰 وام دادن"),
         BotCommand(command="repay", description="✅ پرداخت بدهی"),
