@@ -14,6 +14,9 @@ DB = os.getenv("DB_PATH", "database.db")
 COOLDOWN=1*60*60
 ADMIN_ID=5952134460
 
+db_dir = os.path.dirname(DB)
+if db_dir:
+    os.makedirs(db_dir, exist_ok=True)
 db=sqlite3.connect(DB)
 c=db.cursor()
 
@@ -817,31 +820,44 @@ db.commit()
 
 
 CELEBS = {
+    "Jenny Kitty": ("PH",250,200,"AgACAgQAAxkBAAEii1tqpsVgDm25Nn44iH4e6bjwlTu2DQACAhBrGxHWOFF506Hdb2bopwEAAwIAA3MAAz0E"),
+    "Eva Elfie": ("PH",250,200,"AgACAgQAAxkBAAEii1FqpsQmac1sr7zDK5Xt_G_FbeOM7AACARBrGxHWOFFJWAjEYvCMBwEAAwIAA3MAAz0E"),
+    "Eden Ivy": ("PH",250,200,"AgACAgQAAxkBAAEiiz1qpsBXkEms6B3T44r1Dq3-vTr3VgAC-A9rGxHWOFHl3QmBAqfzCQEAAwIAA3MAAz0E"),
+    "Ana Stangle": ("PH",250,200,"AgACAgQAAxkBAAEiixhqprxb_z1tsYNO_q36AAFG7bhvcrcAAu8PaxsR1jhR-H1AmjEhOykBAAMCAANtAAM9BA"),
+    "Ana Stangle": ("PH",250,200,"AgACAgQAAxkBAAEiixhqprxb_z1tsYNO_q36AAFG7bhvcrcAAu8PaxsR1jhR-H1AmjEhOykBAAMCAANtAAM9BA"),
+    "Polly Yangs": ("PH",250,200,"AgACAgQAAxkBAAEiixZqprwWMSc06gjR6Wf1AfjEMS-bYgAC7g9rGxHWOFF1rqHV_XmcqQEAAwIAA3MAAz0E"),
+    "Mia Malkova": ("PH",250,200,"AgACAgQAAxkBAAEiixJqprvaxcqdkRMMLmDFpVVVJ22ycwAC7Q9rGxHWOFHDv3vxo0jSfAEAAwIAA3MAAz0E"),
+    "Lyli Philips": ("PH",250,200,"AgACAgQAAxkBAAEiiwpqpruE7F2IrBlMo2Z7kJ7-iGC3hgAC6g9rGxHWOFEDhS0dv-NIdQEAAwIAA3MAAz0E"),
+    "Remida": ("PH",250,200,"AgACAgQAAxkBAAEiiwZqprtRYUg6S4AaVWga3nd9oplYegAC6Q9rGxHWOFELW3Aa_kVp9QEAAwIAA3MAAz0E"),
+    "Lily Lou": ("PH",250,200,"AgACAgQAAxkBAAEiiv5qprr3COm1SOlfeWjvRoU-Dmz9AgAC6A9rGxHWOFFkcd5sl-uEqwEAAwIAA3MAAz0E"),
+    "Lena Paul": ("PH",250,200,"AgACAgQAAxkBAAEiivZqprk0NUKUAwABNROBmv06cviy35UAAvgVaxs3EDhR-L2oRxHNDegBAAMCAANzAAM9BA"),
     "Angela White": ("PH",250,200,"AgACAgQAAxkBAAEiK8tqlX0p5xvvc7RkL8yCDK50C70cMAAC3hBrG4IDsFBEhOBKjPVnEgEAAwIAA3MAAz0E"),
     "Comatozze": ("PH",250,200,"AgACAgQAAxkBAAEiK99qlYOdZfkvzeW8xB9yg8ay0a5E0AAC4w9rG8igqVDkAAH7iUzCMUoBAAMCAANzAAM9BA"),
     "Sweetie Fox": ("PH",250,200,"AgACAgQAAxkBAAEiK-NqlYTmIgPdooRd2A-cfBNbZIDWDwAC5g9rG8igqVDv7lHTLO7LEgEAAwIAA3MAAz0E"),
-    "Diana Rider": ("PH",250,200,"AgACAgQAAxkBAAEiK-VqlYWbR4YN5FJHPXwtV1QcRVTuzQAC5w9rG8igqVAWEqBkFTJ6xQEAAwIAA3MAAz0E"),
+    "Diana Rider": ("PH",250,200,"AgACAgQAAxkBAAEiiyZqpr0Z6wHI0orDFTTA0FpqPDKxcgAC8g9rGxHWOFEEh3EQeHYcWwEAAwIAA3MAAz0E"),
     "Lana Rhoades": ("PH",250,200,"AgACAgQAAxkBAAEiK-dqlYZjT3rDHHtNt5EPHZTb_o70xwAC6A9rG8igqVCMQM6VNiWu-wEAAwIAA3MAAz0E"),
     "Ana de Armas": ("S",300,150,"AgACAgQAAxkBAAEiLBRqlYks3xjU5rQCkNXypUQOoS9n3QAC7w9rG8igqVAhpyUv1rvdmwEAAwIAA3MAAz0E"),
-    "Kylie Jenner": ("S",300,150,"AgACAgQAAxkBAAEiK_pqlYgZBOJKJxD9XWYbVXBorKTNhgAC7A9rG8igqVBqjMMOCf_S6QEAAwIAA3MAAz0E"),
-    "Sydney Sweeney": ("S",300,150,"AgACAgQAAxkBAAEiLDpqlYwMquyBS060NrxvsuyO1FNAJAAC8w9rG8igqVD6s_G4PAanHAEAAwIAA3MAAz0E"),
-    "Pinkchyu": ("S",300,150,"AgACAgQAAxkBAAEiLERqlY2raCIQW7DtAfu0VvHOHHmb0wAC9g9rG8igqVAAAaAFvOx8QcwBAAMCAANzAAM9BA"),
-    "Georgina Rodriguez": ("S",300,150,"AgACAgQAAxkBAAEiLEZqlY6XnHzFTpJEDpldzBMTSy2gxgAC-A9rG8igqVBu8-tHMaLjsQEAAwIAA3MAAz0E"),
-    "Madison Beer": ("A",300,150,"AgACAgQAAxkBAAEiLEhqlY9d7gjoBP04fEP7UevZ8dQB7QAC-w9rG8igqVAfR2wrEdm1BwEAAwIAA3MAAz0E"),
+    "Kylie Jenner": ("S",300,150,"AgACAgQAAxkBAAEii0NqpsFgJgN8lSjVTyiKBQanxRUV7AAC_Q9rGxHWOFHpMFeQR7I8fQEAAwIAA3MAAz0E"),
+    "Sydney Sweeney": ("S",300,150,"AgACAgQAAxkBAAEii0tqpsL7OwOzbu-UicheoiKjfQGvEgAC_w9rGxHWOFEfc0vRD4_BvAEAAwIAA3MAAz0E"),
+    "Pinkchyu": ("S",300,150,"AgACAgQAAxkBAAEiiz9qpsDeoCCTvNfIyfhp_0DLu6md9gAC-g9rGxHWOFEwehVusIFDyAEAAwIAA3MAAz0E"),
+    "Georgina Rodriguez": ("S",300,150,"AgACAgQAAxkBAAEii0FqpsEls89dT1QptHWD0jEdIhaOXQAC_A9rGxHWOFGfJx1nk0t_GAEAAwIAA3MAAz0E"),
+    "Madison Beer": ("A",300,150,"AgACAgQAAxkBAAEiix5qpry4N-XRCC1BeUeGrBacwO1PxwAC8Q9rGxHWOFEiXTj03FeFEAEAAwIAA3MAAz0E"),
     "Sadie Sink": ("A",300,150,"AgACAgQAAxkBAAEiLFJqlZEGt1mG9G15PgKP4PPhQcRm-gACARBrG8igqVCvW3ZnrKAGywEAAwIAA3MAAz0E"),
-    "Scarlett Johansson": ("A",300,150,"AgACAgQAAxkBAAEiLGFqlZGwPMq4ggZeAsQ0VekHvdJ3egACBRBrG8igqVAFoaJeMIH-cAEAAwIAA3MAAz0E"),
+    "Scarlett Johansson": ("A",300,150,"AgACAgQAAxkBAAEiizRqpr6LqelgQgABMJSCH4voJHFvKsAAAvcPaxsR1jhRIOR5fA8duesBAAMCAANtAAM9BA"),
     "Anne Hathaway": ("B",300,150,"AgACAgQAAxkBAAEiLHJqlZLNXRVWSN-k7xu-doS7FTDsbgACCRBrG8igqVDk8fgU3uXUFwEAAwIAA3MAAz0E"),
     "Elizabeth Olsen": ("B",300,150,"AgACAgQAAxkBAAEiLHRqlZNem1Ue0rp7IJ182xumcv2XKwACChBrG8igqVDyu9zwySffJAEAAwIAA3MAAz0E"),
     "Olivia Rodrigo": ("B",300,150,"AgACAgQAAxkBAAEiLHZqlZPReBV1oF2fHUcz1MiKfWTuPAACCxBrG8igqVDsVdcPA4GFUAEAAwIAA3MAAz0E"),
     "Emma Watson": ("B",300,150,"AgACAgQAAxkBAAEiLHpqlZRQeIXIaNZcdp3gXLdrXT2anAACDRBrG8igqVC08ITVIg9XMAEAAwIAA3MAAz0E"),
+    "Leah Halton": ("B",300,150,"AgACAgQAAxkBAAEiiyhqpr1II4KnLYGLp4wwWO25ZUjnMwAC8w9rGxHWOFHnxgG03-TRhAEAAwIAA3MAAz0E"),
+    "Ashlyn Castro": ("B",300,150,"AgACAgQAAxkBAAEiiypqpr2gKFikU1gkAAFPisEKVaAKA5oAAvQPaxsR1jhRLB-aZnzbFkIBAAMCAANtAAM9BA"),
     "Kristen Stewart": ("B",300,150,"AgACAgQAAxkBAAEiLHxqlZSorrGyLnSOBdRqRqdnSvnaXgACDxBrG8igqVDQHpTLZKuoOwEAAwIAA3MAAz0E"),
     "Olivia Cooke": ("A",200,100,"AgACAgQAAxkBAAEiLFBqlZC2pdCvovgiG6aqLJwG7oNBHAAC_w9rG8igqVC9yhxFuB9gDQEAAwIAA3MAAz0E"),
     "Scarlett Johansson": ("A",200,100,"https://i.postimg.cc/rmT2mSRG/download-(7).jpg"),
     "Sabrina Carpenter": ("B",200,100,"AgACAgQAAxkBAAEiLGxqlZJxN_AeZTfMK1e_iZUiC4tvaAACBxBrG8igqVD1mfDtce21cAEAAwIAA3MAAz0E"),
     "Dua Lipa": ("A",100,50,"AgACAgQAAxkBAAEiLIRqlZW2x2U46kRw5iGd8GMcDrH5xAACFxBrG8igqVBqy7bfQ8pbLgEAAwIAA3MAAz0E"),
     "Sophie Tatcher": ("A",100,50,"AgACAgQAAxkBAAEiLExqlZBP5UH5p9rTTAUQ6hv3_mUpkAAC_g9rG8igqVABEzpZosgbbAEAAwIAA3MAAz0E"),
-    "Billie Eilish": ("S",100,50,"AgACAgQAAxkBAAEiK_RqlYf6cjcwPHIvFRT9A4ohI-c4UgAC6w9rG8igqVCUtEXfAAF9YyUBAAMCAANzAAM9BA"),
-    "Folorance Pugh": ("B",100,50,"AgACAgQAAxkBAAEiLH5qlZVHegJopSA9qXKzRDL9wgaQbwACFRBrG8igqVDC4D69BeL3nwEAAwIAA3MAAz0E"),
+    "Billie Eilish": ("S",100,50,"AgACAgQAAxkBAAEii01qpsO9jfgwqGNaCOuxcDI2B_tolAACLRFrG-cKCVH7fF__m9zGrQEAAwIAA3MAAz0E"),
+    "Folorance Pugh": ("B",100,50,"AgACAgQAAxkBAAEiizBqpr485700NYU6jwetz6qFBbBYrgAC9g9rGxHWOFFkMl6wX7RergEAAwIAA3MAAz0E"),
 }
 
 
@@ -1600,7 +1616,7 @@ async def addcb(m:Message):
 
 # ================== کمپانی کیر (بازار بورس) ==================
 # فرضیات پیاده‌سازی (اگه فرق داشت بگو عوض کنم):
-# - فقط  ادمین بازار رو باز/بسته می‌کنه (/copen و /cclose)
+# - فقط ادمین بازار رو باز/بسته می‌کنه (/copen و /cclose)
 # - بین دوتا /copen هیچ محدودیت زمانی وجود نداره؛ ادمین هر وقت خواست باز/بسته می‌کنه
 # - حداقل بودجه‌ی هر شرکت رندومه (بین ۵ تا ۱۵ سانت) و برای هر شرکت جدا تعیین میشه
 # - هر سرمایه‌گذاری باید حداقل ۱۰٪ سایز لحظه‌ای فرد باشه؛ سقفی برای حداکثرش نیست (نامحدود)
