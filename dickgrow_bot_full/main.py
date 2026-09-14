@@ -1662,7 +1662,27 @@ async def addcm(m:Message):
     new_size = get_size(m.chat.id, target)
     await m.reply(f"✅ {amount} سانت به {m.reply_to_message.from_user.full_name} اضافه شد!\n📏 اندازه جدید: {new_size} سانت")
 
-@dp.message(Command("addsperm"))
+@dp.message(Command("luckydrop"))
+async def lucky_drop(m: Message):
+    if m.from_user.id not in ADMIN_IDS:
+        return await m.reply("❌ دسترسی ندارید!")
+    prize = 50
+    try:
+        parts = m.text.split()
+        if len(parts) > 1:
+            prize = int(parts[1])
+    except:
+        pass
+    players = c.execute("SELECT user_id,name FROM users WHERE chat_id=?", (m.chat.id,)).fetchall()
+    if not players:
+        return await m.reply("❌ هنوز کسی تو این گروه بازی نکرده که قرعه‌کشی بشه.")
+    winner_id, winner_name = random.choice(players)
+    c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (prize, m.chat.id, winner_id))
+    db.commit()
+    new_size = get_size(m.chat.id, winner_id)
+    await m.reply(f"🎉 قرعه‌کشی رندوم!\n\n🍆 {winner_name} خوش‌شانس بود و {prize} سانت مجانی گرفت!\n📏 اندازه‌ی جدیدش: {new_size} سانت")
+
+
 async def addsperm(m:Message):
     if m.from_user.id not in ADMIN_IDS:
         return await m.reply("❌ دسترسی ندارید!")
@@ -2200,6 +2220,7 @@ async def main():
         BotCommand(command="useyar", description="🕵️ فرستادن یار به نبرد مافیای فعلیت"),
         BotCommand(command="cashout", description="💸 نقد کردن نصف ارزش کمپانی"),
         BotCommand(command="addcm", description="➕ افزودن سانت به کاربر (ادمین)"),
+        BotCommand(command="luckydrop", description="🎉 دادن سانت به یه بازیکن رندوم (ادمین)"),
         BotCommand(command="addsperm", description="➕ افزودن اسپرم به کاربر (ادمین)"),
         BotCommand(command="addspermall", description="➕ افزودن اسپرم به همه (ادمین)"),
         BotCommand(command="addcb", description="👑 دادن/گرفتن سلبریتی از کاربر (ادمین)"),
