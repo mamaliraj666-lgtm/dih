@@ -99,12 +99,6 @@ except sqlite3.OperationalError:
 
 SPERM_RATE = 2  # ۱ سانت = ۲ اسپرم (واحد جداگانه‌ی بخش بورس)
 
-try:
-    c.execute("ALTER TABLE users ADD COLUMN last_tax_day TEXT DEFAULT ''")
-    db.commit()
-except sqlite3.OperationalError:
-    pass
-
 def strip_command(text: str) -> str:
     """حذف /command یا /command@botusername از ابتدای متن و برگردوندن بقیه‌ی متن.
     این کار لازمه چون تو گروه‌ها تلگرام معمولاً @یوزرنیم بات رو به دستور می‌چسبونه
@@ -167,10 +161,7 @@ HELP_SECTIONS = {
         "🔒 /lock [اسم] — قفل کردن یه سلبریتی در برابر فروش خودکار (هزینه بر اساس تیرش فرق داره)\n"
         "🏅 /collectors — کی بیشترین سلبریتی رو داره\n"
         "💳 /gloan — وام مخصوص خرید سلبریتی\n"
-        "💵 /gpay [مقدار] — پرداخت اون وام\n\n"
-        "🍆 هر روز باید بابت سلبریتی‌هایی که داری «مالیات» بدی (بر اساس تیرشون):\n"
-        "📋 /taxstatus — دیدن مالیات امروزت قبل از کسر خودکار\n"
-        "💸 /paytax — پرداخت دستی مالیات امروز"
+        "💵 /gpay [مقدار] — پرداخت اون وام"
     ),
     "bourse": (
         "📈 بورس",
@@ -920,9 +911,8 @@ db.commit()
 CELEBS = {
     "Jenny Kitty": ("PH",360,300,"AgACAgQAAxkBAAEii1tqpsVgDm25Nn44iH4e6bjwlTu2DQACAhBrGxHWOFF506Hdb2bopwEAAwIAA3MAAz0E"),
     "Eva Elfie": ("PH",360,300,"AgACAgQAAxkBAAEii1FqpsQmac1sr7zDK5Xt_G_FbeOM7AACARBrGxHWOFFJWAjEYvCMBwEAAwIAA3MAAz0E"),
-    "Eden Ivy": ("PH",360,300,"AgACAgQAAxkBAAEiiz1qpsBXkEms6B3T44r1Dq3-vTr3VgAC-A9rGxHWOFHl3QmBAqfzCQEAAwIAA3MAAz0E"),
-    "Ana Stangle": ("PH",360,300,"AgACAgQAAxkBAAEiixhqprxb_z1tsYNO_q36AAFG7bhvcrcAAu8PaxsR1jhR-H1AmjEhOykBAAMCAANtAAM9BA"),
-    "Ana Stangle": ("PH",360,300,"AgACAgQAAxkBAAEiixhqprxb_z1tsYNO_q36AAFG7bhvcrcAAu8PaxsR1jhR-H1AmjEhOykBAAMCAANtAAM9BA"),
+    "Eden Ivy": ("PH",360,300,"AgACAgQAAxkBAAEixFxqsbxspcJ6O37kDI4Ha-S_3gGe6AACEBFrG9E-QVHRkUKIZY82rQEAAwIAA3MAAz0E"),
+    "Ana Stangle": ("PH",360,300,"AgACAgQAAxkBAAEixF5qsbx6B4QTZurndRVHfM1q4tn91QACQRFrG9E-QVFfgbaZhJaJtAEAAwIAA3MAAz0E"),
     "Polly Yangs": ("PH",360,300,"AgACAgQAAxkBAAEiixZqprwWMSc06gjR6Wf1AfjEMS-bYgAC7g9rGxHWOFF1rqHV_XmcqQEAAwIAA3MAAz0E"),
     "Mia Malkova": ("PH",360,300,"AgACAgQAAxkBAAEiixJqprvaxcqdkRMMLmDFpVVVJ22ycwAC7Q9rGxHWOFHDv3vxo0jSfAEAAwIAA3MAAz0E"),
     "Lyli Philips": ("PH",360,300,"AgACAgQAAxkBAAEiiwpqpruE7F2IrBlMo2Z7kJ7-iGC3hgAC6g9rGxHWOFEDhS0dv-NIdQEAAwIAA3MAAz0E"),
@@ -1531,118 +1521,6 @@ async def check_loans(bot):
             except:
                 pass
 
-# ===== مالیات روزانه‌ی کص‌داری =====
-TAX_RATES = {"B": 5, "A": 10, "S": 20, "PH": 30}
-TAX_CHECK_INTERVAL = 300  # هر ۵ دقیقه چک می‌کنه کدوم کاربرها هنوز مالیات امروزشون رو ندادن
-
-def get_tax_breakdown(chat_id, uid):
-    """برمی‌گردونه: (tier_counts, total_tax) بدون اینکه چیزی رو تغییر بده."""
-    celebs = c.execute("SELECT celeb FROM collections WHERE chat_id=? AND user_id=?", (chat_id, uid)).fetchall()
-    tier_counts = {}
-    for (celeb_name,) in celebs:
-        info = CELEBS.get(celeb_name)
-        if not info:
-            continue
-        tier = info[0]
-        tier_counts[tier] = tier_counts.get(tier, 0) + 1
-    total_tax = sum(tier_counts.get(t, 0) * rate for t, rate in TAX_RATES.items())
-    return tier_counts, total_tax
-
-def apply_daily_tax(chat_id, uid):
-    """اگه امروز مالیات این کاربر پرداخت نشده باشه، محاسبه و کسر می‌کنه و last_tax_day رو آپدیت می‌کنه.
-    خروجی: None اگه کاری لازم نبود (قبلاً پرداخت شده یا مالیاتی نداره)، وگرنه دیکشنری با جزئیات."""
-    today = today_str()
-    row = c.execute("SELECT last_tax_day FROM users WHERE chat_id=? AND user_id=?", (chat_id, uid)).fetchone()
-    if not row or row[0] == today:
-        return None
-    tier_counts, total_tax = get_tax_breakdown(chat_id, uid)
-    if total_tax <= 0:
-        c.execute("UPDATE users SET last_tax_day=? WHERE chat_id=? AND user_id=?", (today, chat_id, uid))
-        db.commit()
-        return None
-    size = get_size(chat_id, uid)
-    sold = []
-    if size < total_tax:
-        sellable = c.execute(
-            "SELECT celeb, paid_price FROM collections WHERE chat_id=? AND user_id=? AND locked=0 ORDER BY paid_price ASC",
-            (chat_id, uid)
-        ).fetchall()
-        needed = total_tax - size
-        for celeb_name, paid_price in sellable:
-            if needed <= 0:
-                break
-            c.execute("DELETE FROM collections WHERE chat_id=? AND user_id=? AND celeb=?", (chat_id, uid, celeb_name))
-            size += paid_price
-            needed -= paid_price
-            sold.append((celeb_name, paid_price))
-        db.commit()
-        size = get_size(chat_id, uid)
-    deduct = min(total_tax, size)
-    c.execute("UPDATE users SET size=size-?, last_tax_day=? WHERE chat_id=? AND user_id=?", (deduct, today, chat_id, uid))
-    remaining = total_tax - deduct
-    if remaining > 0:
-        c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (remaining, chat_id, uid))
-    db.commit()
-    return {"tier_counts": tier_counts, "total_tax": total_tax, "sold": sold, "remaining": remaining}
-
-def format_tax_message(result):
-    tier_counts, total_tax = result["tier_counts"], result["total_tax"]
-    breakdown = "\n".join(
-        f"• Tier {t}: {tier_counts[t]} تا × {TAX_RATES[t]} = {tier_counts[t]*TAX_RATES[t]} سانت"
-        for t in ("PH", "S", "A", "B") if tier_counts.get(t)
-    )
-    msg = f"🍆 مالیات روزانه‌ی کص‌داری!\nهر روز باید بابت کص‌هایی که داری خرجشون رو بدی وگرنه فراریت می‌دن:\n\n{breakdown}\n\n💸 مجموع مالیات: {total_tax} سانت\n"
-    if result["remaining"] > 0:
-        msg += f"\n📉 {result['remaining']} سانت هم کم نداشتی، حسابت منفی شد!"
-    else:
-        msg += "\n✅ کامل پرداخت شد."
-    if result["sold"]:
-        msg += "\n\n" + "\n".join(f"💔 نتونستی خرج «{n}» رو بدی، فراریش دادی و فروختیش (+{p} سانت)" for n, p in result["sold"])
-    return msg
-
-@dp.message(Command("taxstatus"))
-async def tax_status(m: Message):
-    user(m.chat.id, m.from_user.id, m.from_user.full_name)
-    today = today_str()
-    last_day = c.execute("SELECT last_tax_day FROM users WHERE chat_id=? AND user_id=?", (m.chat.id, m.from_user.id)).fetchone()[0]
-    if last_day == today:
-        return await m.reply("✅ مالیات امروزت رو قبلاً دادی، خیالت راحت باشه.")
-    tier_counts, total_tax = get_tax_breakdown(m.chat.id, m.from_user.id)
-    if total_tax <= 0:
-        return await m.reply("📭 هنوز هیچ کصی نداری که بابتش مالیات بدی!")
-    breakdown = "\n".join(
-        f"• Tier {t}: {tier_counts[t]} تا × {TAX_RATES[t]} = {tier_counts[t]*TAX_RATES[t]} سانت"
-        for t in ("PH", "S", "A", "B") if tier_counts.get(t)
-    )
-    size = get_size(m.chat.id, m.from_user.id)
-    warn = "" if size >= total_tax else "\n⚠️ سانتت کافی نیست! اگه دستی پرداخت نکنی، خودکار می‌فروشه یا حسابت منفی می‌شه."
-    await m.reply(
-        f"🍆 مالیات امروزت هنوز پرداخت نشده:\n\n{breakdown}\n\n💸 مجموع: {total_tax} سانت\n💰 موجودی فعلی: {size} سانت{warn}\n\nبا /paytax می‌تونی همین الان بدیش."
-    )
-
-@dp.message(Command("paytax"))
-async def pay_tax_cmd(m: Message):
-    user(m.chat.id, m.from_user.id, m.from_user.full_name)
-    result = apply_daily_tax(m.chat.id, m.from_user.id)
-    if result is None:
-        return await m.reply("✅ مالیات امروزت رو قبلاً دادی (یا چیزی نداری که بابتش مالیات بدی).")
-    await m.reply(format_tax_message(result))
-
-async def celeb_tax_loop(bot):
-    while True:
-        await asyncio.sleep(TAX_CHECK_INTERVAL)
-        today = today_str()
-        owners = c.execute("SELECT DISTINCT chat_id, user_id FROM collections").fetchall()
-        for chat_id, uid in owners:
-            result = apply_daily_tax(chat_id, uid)
-            if result is None:
-                continue
-            try:
-                await bot.send_message(uid, format_tax_message(result))
-            except:
-                pass
-
-
 
 @dp.message(Command("addcm"))
 async def addcm(m:Message):
@@ -2213,8 +2091,6 @@ async def main():
         BotCommand(command="invest", description="💰 سرمایه‌گذاری روی یه کمپانی"),
         BotCommand(command="cclose", description="📉 بستن بازار و اعلام برنده (ادمین)"),
         BotCommand(command="mycompanies", description="🏢 کمپانی‌های من"),
-        BotCommand(command="taxstatus", description="🍆 وضعیت مالیات امروز"),
-        BotCommand(command="paytax", description="💸 پرداخت دستی مالیات امروز"),
         BotCommand(command="bourseleader", description="📊 جدول رنک بورس گروه"),
         BotCommand(command="hire", description="🔫 خرید یار برای کمپانی"),
         BotCommand(command="useyar", description="🕵️ فرستادن یار به نبرد مافیای فعلیت"),
@@ -2230,7 +2106,6 @@ async def main():
     await bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats())
     asyncio.create_task(check_loans(bot))
     asyncio.create_task(company_dividend_loop(bot))
-    asyncio.create_task(celeb_tax_loop(bot))
     await dp.start_polling(bot)
 
 if __name__=="__main__":
