@@ -909,13 +909,11 @@ db.commit()
 
 
 CELEBS = {
-"Reislin": ("PH",360,300,"AgACAgQAAxkBAAEiyFBqsl-5jTz16APdmObyCkIx7YxhswAClQ5rG7ngkFFdW6GmZb8jHQEAAwIAA3MAAz0E"),
-"realtrelilove": ("PH",360,300,"AgACAgQAAxkBAAEiyFJqsmCJV0lfG4fGyV1NAzacB8Cw-QACmA5rG7ngkFF8Fc3TvW79agEAAwIAA3MAAz0E"),
-
     "Jenny Kitty": ("PH",360,300,"AgACAgQAAxkBAAEii1tqpsVgDm25Nn44iH4e6bjwlTu2DQACAhBrGxHWOFF506Hdb2bopwEAAwIAA3MAAz0E"),
     "Eva Elfie": ("PH",360,300,"AgACAgQAAxkBAAEii1FqpsQmac1sr7zDK5Xt_G_FbeOM7AACARBrGxHWOFFJWAjEYvCMBwEAAwIAA3MAAz0E"),
-    "Eden Ivy": ("PH",360,300,"AgACAgQAAxkBAAEixFxqsbxspcJ6O37kDI4Ha-S_3gGe6AACEBFrG9E-QVHRkUKIZY82rQEAAwIAA3MAAz0E"),
-    "Ana Stangle": ("PH",360,300,"AgACAgQAAxkBAAEixF5qsbx6B4QTZurndRVHfM1q4tn91QACQRFrG9E-QVFfgbaZhJaJtAEAAwIAA3MAAz0E"),
+    "Eden Ivy": ("PH",360,300,"AgACAgQAAxkBAAEiiz1qpsBXkEms6B3T44r1Dq3-vTr3VgAC-A9rGxHWOFHl3QmBAqfzCQEAAwIAA3MAAz0E"),
+    "Ana Stangle": ("PH",360,300,"AgACAgQAAxkBAAEiixhqprxb_z1tsYNO_q36AAFG7bhvcrcAAu8PaxsR1jhR-H1AmjEhOykBAAMCAANtAAM9BA"),
+    "Ana Stangle": ("PH",360,300,"AgACAgQAAxkBAAEiixhqprxb_z1tsYNO_q36AAFG7bhvcrcAAu8PaxsR1jhR-H1AmjEhOykBAAMCAANtAAM9BA"),
     "Polly Yangs": ("PH",360,300,"AgACAgQAAxkBAAEiixZqprwWMSc06gjR6Wf1AfjEMS-bYgAC7g9rGxHWOFF1rqHV_XmcqQEAAwIAA3MAAz0E"),
     "Mia Malkova": ("PH",360,300,"AgACAgQAAxkBAAEiixJqprvaxcqdkRMMLmDFpVVVJ22ycwAC7Q9rGxHWOFHDv3vxo0jSfAEAAwIAA3MAAz0E"),
     "Lyli Philips": ("PH",360,300,"AgACAgQAAxkBAAEiiwpqpruE7F2IrBlMo2Z7kJ7-iGC3hgAC6g9rGxHWOFEDhS0dv-NIdQEAAwIAA3MAAz0E"),
@@ -1563,6 +1561,34 @@ async def lucky_drop(m: Message):
     new_size = get_size(m.chat.id, winner_id)
     await m.reply(f"🎉 قرعه‌کشی رندوم!\n\n🍆 {winner_name} خوش‌شانس بود و {prize} سانت مجانی گرفت!\n📏 اندازه‌ی جدیدش: {new_size} سانت")
 
+@dp.message(Command("resetgroup"))
+async def reset_group(m: Message):
+    if m.from_user.id not in ADMIN_IDS:
+        return await m.reply("❌ دسترسی ندارید!")
+    parts = m.text.split()
+    if len(parts) < 2 or parts[1] != "CONFIRM":
+        return await m.reply(
+            "⚠️ این کار همه‌ی داده‌های این گروه رو کاملاً و برای همیشه پاک می‌کنه:\n"
+            "سایز/اسپرم همه، رنک، مافیا، بورس، کلکسیون سلبریتی‌ها، وام‌ها و Dicko.\n\n"
+            "اگه مطمئنی، بنویس:\n/resetgroup CONFIRM"
+        )
+    chat_id = m.chat.id
+    # جدول‌هایی که مستقیم ستون chat_id دارن
+    for table in (
+        "users", "pvp_stats", "rank_stats", "dicko_daily", "loans", "listings",
+        "game_loans", "mafia_battles", "mafia2_battles", "collections",
+        "company_rounds", "company_options", "company_investments",
+        "company_participants", "owned_companies",
+    ):
+        c.execute(f"DELETE FROM {table} WHERE chat_id=?", (chat_id,))
+    # جدول‌هایی که فقط از طریق battle_id/session_id به گروه وصلن
+    c.execute("DELETE FROM mafia_members WHERE battle_id IN (SELECT id FROM mafia_battles WHERE chat_id=?)", (chat_id,))
+    c.execute("DELETE FROM mafia2_members WHERE battle_id IN (SELECT id FROM mafia2_battles WHERE chat_id=?)", (chat_id,))
+    c.execute("DELETE FROM dicko_votes WHERE session_id IN (SELECT id FROM dicko_sessions WHERE chat_id=?)", (chat_id,))
+    c.execute("DELETE FROM dicko_sessions WHERE chat_id=?", (chat_id,))
+    db.commit()
+    await m.reply("✅ همه‌ی داده‌های این گروه پاک شد. بازی از صفر شروع می‌شه.")
+
 
 async def addsperm(m:Message):
     if m.from_user.id not in ADMIN_IDS:
@@ -2100,6 +2126,7 @@ async def main():
         BotCommand(command="cashout", description="💸 نقد کردن نصف ارزش کمپانی"),
         BotCommand(command="addcm", description="➕ افزودن سانت به کاربر (ادمین)"),
         BotCommand(command="luckydrop", description="🎉 دادن سانت به یه بازیکن رندوم (ادمین)"),
+        BotCommand(command="resetgroup", description="⚠️ پاک کردن کامل داده‌های این گروه (ادمین)"),
         BotCommand(command="addsperm", description="➕ افزودن اسپرم به کاربر (ادمین)"),
         BotCommand(command="addspermall", description="➕ افزودن اسپرم به همه (ادمین)"),
         BotCommand(command="addcb", description="👑 دادن/گرفتن سلبریتی از کاربر (ادمین)"),
