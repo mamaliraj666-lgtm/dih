@@ -97,6 +97,29 @@ try:
 except sqlite3.OperationalError:
     pass
 
+try:
+    c.execute("ALTER TABLE users ADD COLUMN farm_plots INTEGER DEFAULT 2")
+    db.commit()
+except sqlite3.OperationalError:
+    pass
+
+c.execute("""CREATE TABLE IF NOT EXISTS farm_tiles(
+    chat_id INTEGER,
+    user_id INTEGER,
+    plot_num INTEGER,
+    egg_type TEXT,
+    planted_at INTEGER,
+    PRIMARY KEY(chat_id, user_id, plot_num)
+)""")
+c.execute("""CREATE TABLE IF NOT EXISTS farm_inventory(
+    chat_id INTEGER,
+    user_id INTEGER,
+    egg_type TEXT,
+    count INTEGER DEFAULT 0,
+    PRIMARY KEY(chat_id, user_id, egg_type)
+)""")
+db.commit()
+
 SPERM_RATE = 2  # ۱ سانت = ۲ اسپرم (واحد جداگانه‌ی بخش بورس)
 
 def strip_command(text: str) -> str:
@@ -174,6 +197,15 @@ HELP_SECTIONS = {
         "💰 /cashout [شماره شرکت] — نقد کردن نصف ارزش یه شرکت به اسپرم\n\n"
         "بورس با «اسپرم» کار می‌کنه، نه سانت — اول با /tosperm سانتت رو تبدیل کن."
     ),
+    "farm": (
+        "🌾 مزرعه‌ی اسپرم",
+        "🌾 /farm — باز کردن پنل مزرعه (یه گرید از زمین‌هات با دکمه)\n\n"
+        "➕ زمین خالی → بزن روش تا تخمی که تو انبارت داری رو بکاری\n"
+        "⏳ در حال رشد → بزن روش تا ببینی چقدر مونده\n"
+        "✅ آماده‌ی برداشت → بزن روش تا اسپرم بگیری\n"
+        "💀 فاسدشده → اگه دیر بجنبی نصف ارزشش رو می‌گیری\n\n"
+        "از همون پنل می‌تونی زمین جدید باز کنی، یه تخم تکی شانسی بخری (۵ سانت)، یا یه پک ۳تایی بخری (۳۰ سانت). رنگ‌های ارزون (⚪🟢) شانس دارن موقع برداشت یه تخم دیگه از خودشون بندازن؛ رنگ‌های کمیاب (🔵🟣🟡) هیچ‌وقت تکرار نمی‌شن ولی سودشون خیلی بیشتره."
+    ),
 }
 
 @dp.message(Command("help"))
@@ -184,6 +216,7 @@ async def help_cmd(m: Message):
         [InlineKeyboardButton(text="🔫 مافیا", callback_data="help:mafia")],
         [InlineKeyboardButton(text="🌟 سلبریتی‌ها", callback_data="help:celeb")],
         [InlineKeyboardButton(text="📈 بورس", callback_data="help:bourse")],
+        [InlineKeyboardButton(text="🌾 مزرعه", callback_data="help:farm")],
     ])
     await m.reply(
         "📖 راهنمای بازی\n\n"
@@ -200,6 +233,7 @@ async def help_section(q: CallbackQuery):
         [InlineKeyboardButton(text="🔫 مافیا", callback_data="help:mafia")],
         [InlineKeyboardButton(text="🌟 سلبریتی‌ها", callback_data="help:celeb")],
         [InlineKeyboardButton(text="📈 بورس", callback_data="help:bourse")],
+        [InlineKeyboardButton(text="🌾 مزرعه", callback_data="help:farm")],
     ])
     if key == "back" or key not in HELP_SECTIONS:
         await q.message.edit_text("📖 راهنمای بازی\n\nیه بخش رو انتخاب کن تا کامندهاش رو ببینی:", reply_markup=main_kb)
@@ -272,6 +306,225 @@ async def to_cent(m:Message):
     c.execute("UPDATE users SET sperm=sperm-?,size=size+? WHERE chat_id=? AND user_id=?",(used,gained,m.chat.id,m.from_user.id))
     db.commit()
     await m.reply(f"💰 {used} اسپرم تبدیل شد به {gained} سانت!")
+
+# ===== مزرعه‌ی اسپرم =====
+EGGS = {
+    "white":  {"emoji": "⚪", "name": "تخم شل",         "chance": 50, "time": 30*60,    "min": 5,   "max": 10,  "replicate": 30},
+    "green":  {"emoji": "🟢", "name": "تخم آبدار",      "chance": 25, "time": 2*3600,   "min": 20,  "max": 35,  "replicate": 15},
+    "blue":   {"emoji": "🔵", "name": "تخم پرقدرت",     "chance": 15, "time": 6*3600,   "min": 60,  "max": 100, "replicate": 0},
+    "purple": {"emoji": "🟣", "name": "تخم رعدآسا",     "chance": 8,  "time": 12*3600,  "min": 150, "max": 250, "replicate": 0},
+    "gold":   {"emoji": "🟡", "name": "تخم ایلان ماسک", "chance": 2,  "time": 24*3600,  "min": 500, "max": 800, "replicate": 0},
+}
+EGG_SURPRISE_CHANCE = 0.02   # شانس اینکه یه تخم ارزون در واقع طلایی مخفی دربیاد
+FARM_SPOIL_MULTIPLIER = 2    # بعد این‌قدر برابر زمان اصلی، تخم فاسد میشه و نصف ارزش میده
+FARM_PAGE_SIZE = 9           # هر صفحه از پنل چندتا خونه نشون بده (۳ در ۳)
+EGG_SINGLE_COST = 5          # هزینه‌ی یه تخم تکی شانسی
+EGG_PACK_COST = 30           # هزینه‌ی هر پک (۳ تخم شانسی)
+EGG_PACK_SIZE = 3
+PLOT_BASE_COST = 20          # هزینه‌ی باز کردن اولین زمین‌های اضافه؛ هرچی بیشتر داشته باشی گرون‌تر میشه
+
+def roll_egg():
+    names = list(EGGS.keys())
+    weights = [EGGS[n]["chance"] for n in names]
+    egg = random.choices(names, weights=weights, k=1)[0]
+    if egg in ("white", "green") and random.random() < EGG_SURPRISE_CHANCE:
+        return "gold", True
+    return egg, False
+
+def add_egg_to_inventory(chat_id, uid, egg_type, qty=1):
+    c.execute(
+        "INSERT INTO farm_inventory(chat_id,user_id,egg_type,count) VALUES(?,?,?,?) "
+        "ON CONFLICT(chat_id,user_id,egg_type) DO UPDATE SET count=count+excluded.count",
+        (chat_id, uid, egg_type, qty)
+    )
+
+def get_inventory(chat_id, uid):
+    rows = c.execute("SELECT egg_type,count FROM farm_inventory WHERE chat_id=? AND user_id=? AND count>0", (chat_id, uid)).fetchall()
+    return {t: n for t, n in rows}
+
+def plot_unlock_cost(owned):
+    return PLOT_BASE_COST + 15 * max(0, owned - 2)
+
+def tile_state(egg_type, planted_at):
+    """برمی‌گردونه: ('growing'|'ready'|'spoiled', ثانیه‌ی باقی‌مونده یا گذشته)"""
+    info = EGGS[egg_type]
+    elapsed = int(time.time()) - planted_at
+    if elapsed < info["time"]:
+        return "growing", info["time"] - elapsed
+    if elapsed < info["time"] * FARM_SPOIL_MULTIPLIER:
+        return "ready", elapsed - info["time"]
+    return "spoiled", elapsed - info["time"] * FARM_SPOIL_MULTIPLIER
+
+def fmt_time(seconds):
+    seconds = max(0, int(seconds))
+    h, rem = divmod(seconds, 3600)
+    mnt, _ = divmod(rem, 60)
+    if h:
+        return f"{h}:{mnt:02d}h"
+    return f"{mnt}m"
+
+def build_farm_keyboard(chat_id, uid, page):
+    owned = c.execute("SELECT farm_plots FROM users WHERE chat_id=? AND user_id=?", (chat_id, uid)).fetchone()
+    owned = owned[0] if owned else 2
+    tiles = {n: (e, p) for n, e, p in c.execute(
+        "SELECT plot_num,egg_type,planted_at FROM farm_tiles WHERE chat_id=? AND user_id=?", (chat_id, uid)
+    ).fetchall()}
+    total_pages = max(1, (owned + FARM_PAGE_SIZE - 1) // FARM_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * FARM_PAGE_SIZE
+    rows = []
+    row = []
+    for i in range(start, start + FARM_PAGE_SIZE):
+        if i >= owned:
+            row.append(InlineKeyboardButton(text="🔒", callback_data="farm:noop"))
+        elif i in tiles:
+            egg_type, planted_at = tiles[i]
+            state, _ = tile_state(egg_type, planted_at)
+            emoji = EGGS[egg_type]["emoji"]
+            label = {"growing": f"{emoji}⏳", "ready": f"✅{emoji}", "spoiled": f"💀{emoji}"}[state]
+            row.append(InlineKeyboardButton(text=label, callback_data=f"farm:tile:{page}:{i}"))
+        else:
+            row.append(InlineKeyboardButton(text="➕", callback_data=f"farm:tile:{page}:{i}"))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"farm:page:{page-1}"))
+    nav.append(InlineKeyboardButton(text=f"📄 {page+1}/{total_pages}", callback_data="farm:noop"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"farm:page:{page+1}"))
+    rows.append(nav)
+    rows.append([InlineKeyboardButton(text=f"➕ باز کردن زمین جدید ({plot_unlock_cost(owned)} سانت)", callback_data=f"farm:unlock:{page}")])
+    rows.append([InlineKeyboardButton(text=f"🥚 یه تخم تکی ({EGG_SINGLE_COST} سانت)", callback_data=f"farm:buyegg:{page}")])
+    rows.append([InlineKeyboardButton(text=f"📦 پک ۳تایی ({EGG_PACK_COST} سانت)", callback_data=f"farm:buypack:{page}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def build_farm_text(chat_id, uid):
+    inv = get_inventory(chat_id, uid)
+    inv_txt = "، ".join(f"{EGGS[t]['emoji']}×{n}" for t, n in inv.items()) if inv else "خالیه"
+    return f"🌾 مزرعه‌ی اسپرم\n\n📦 انبار تخم: {inv_txt}\n\n➕ زمین خالی | ⏳ در حال رشد | ✅ آماده‌ی برداشت | 💀 فاسدشده (نصف ارزش)"
+
+@dp.message(Command("farm"))
+async def farm_cmd(m: Message):
+    user(m.chat.id, m.from_user.id, m.from_user.full_name)
+    await m.reply(build_farm_text(m.chat.id, m.from_user.id), reply_markup=build_farm_keyboard(m.chat.id, m.from_user.id, 0))
+
+@dp.callback_query(F.data == "farm:noop")
+async def farm_noop(q: CallbackQuery):
+    await q.answer()
+
+@dp.callback_query(F.data.startswith("farm:page:"))
+async def farm_page(q: CallbackQuery):
+    page = int(q.data.split(":")[2])
+    await q.message.edit_text(build_farm_text(q.message.chat.id, q.from_user.id), reply_markup=build_farm_keyboard(q.message.chat.id, q.from_user.id, page))
+    await q.answer()
+
+@dp.callback_query(F.data.startswith("farm:unlock:"))
+async def farm_unlock(q: CallbackQuery):
+    page = int(q.data.split(":")[2])
+    chat_id, uid = q.message.chat.id, q.from_user.id
+    user(chat_id, uid, q.from_user.full_name)
+    owned = c.execute("SELECT farm_plots FROM users WHERE chat_id=? AND user_id=?", (chat_id, uid)).fetchone()[0]
+    cost = plot_unlock_cost(owned)
+    if get_size(chat_id, uid) < cost:
+        return await q.answer(f"❌ {cost} سانت لازم داری!", show_alert=True)
+    c.execute("UPDATE users SET size=size-?, farm_plots=farm_plots+1 WHERE chat_id=? AND user_id=?", (cost, chat_id, uid))
+    db.commit()
+    await q.answer("✅ یه زمین جدید باز شد!")
+    await q.message.edit_text(build_farm_text(chat_id, uid), reply_markup=build_farm_keyboard(chat_id, uid, page))
+
+@dp.callback_query(F.data.startswith("farm:buyegg:"))
+async def farm_buyegg(q: CallbackQuery):
+    page = int(q.data.split(":")[2])
+    chat_id, uid = q.message.chat.id, q.from_user.id
+    user(chat_id, uid, q.from_user.full_name)
+    if get_size(chat_id, uid) < EGG_SINGLE_COST:
+        return await q.answer(f"❌ {EGG_SINGLE_COST} سانت لازم داری!", show_alert=True)
+    c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (EGG_SINGLE_COST, chat_id, uid))
+    egg, surprise = roll_egg()
+    add_egg_to_inventory(chat_id, uid, egg, 1)
+    db.commit()
+    alert = f"🥚 گرفتی: {EGGS[egg]['emoji']} {EGGS[egg]['name']}!"
+    if surprise:
+        alert = "🎉🎉 چی؟! این یکی اصلاً معمولی نبود!\n\n" + alert
+    await q.answer(alert, show_alert=True)
+    await q.message.edit_text(build_farm_text(chat_id, uid), reply_markup=build_farm_keyboard(chat_id, uid, page))
+
+@dp.callback_query(F.data.startswith("farm:buypack:"))
+async def farm_buypack(q: CallbackQuery):
+    page = int(q.data.split(":")[2])
+    chat_id, uid = q.message.chat.id, q.from_user.id
+    user(chat_id, uid, q.from_user.full_name)
+    if get_size(chat_id, uid) < EGG_PACK_COST:
+        return await q.answer(f"❌ {EGG_PACK_COST} سانت لازم داری!", show_alert=True)
+    c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (EGG_PACK_COST, chat_id, uid))
+    results = []
+    surprise = False
+    for _ in range(EGG_PACK_SIZE):
+        egg, was_surprise = roll_egg()
+        add_egg_to_inventory(chat_id, uid, egg, 1)
+        results.append(egg)
+        surprise = surprise or was_surprise
+    db.commit()
+    lines = "\n".join(f"{EGGS[e]['emoji']} {EGGS[e]['name']}" for e in results)
+    alert = "🎉 پک باز شد:\n" + lines
+    if surprise:
+        alert = "🎉🎉 چی؟! یکیشون اصلاً معمولی نبود!\n\n" + alert
+    await q.answer(alert, show_alert=True)
+    await q.message.edit_text(build_farm_text(chat_id, uid), reply_markup=build_farm_keyboard(chat_id, uid, page))
+
+@dp.callback_query(F.data.startswith("farm:tile:"))
+async def farm_tile(q: CallbackQuery):
+    _, _, page, num = q.data.split(":")
+    page, num = int(page), int(num)
+    chat_id, uid = q.message.chat.id, q.from_user.id
+    user(chat_id, uid, q.from_user.full_name)
+    tile = c.execute("SELECT egg_type,planted_at FROM farm_tiles WHERE chat_id=? AND user_id=? AND plot_num=?", (chat_id, uid, num)).fetchone()
+    if tile:
+        egg_type, planted_at = tile
+        state, delta = tile_state(egg_type, planted_at)
+        info = EGGS[egg_type]
+        if state == "growing":
+            return await q.answer(f"{info['emoji']} {info['name']} — {fmt_time(delta)} مونده", show_alert=True)
+        gained = random.randint(info["min"], info["max"])
+        if state == "spoiled":
+            gained //= 2
+        c.execute("UPDATE users SET sperm=sperm+? WHERE chat_id=? AND user_id=?", (gained, chat_id, uid))
+        c.execute("DELETE FROM farm_tiles WHERE chat_id=? AND user_id=? AND plot_num=?", (chat_id, uid, num))
+        msg = f"{'💀 فاسد شده بود ولی بازم چیزی گیرت اومد!' if state=='spoiled' else '✅ برداشت شد!'}\n{info['emoji']} {info['name']}: +{gained} اسپرم"
+        if info["replicate"] and random.randint(1, 100) <= info["replicate"]:
+            add_egg_to_inventory(chat_id, uid, egg_type, 1)
+            msg += f"\n🍀 یه {info['emoji']} {info['name']} دیگه هم افتاد تو انبارت!"
+        db.commit()
+        await q.answer(msg, show_alert=True)
+        return await q.message.edit_text(build_farm_text(chat_id, uid), reply_markup=build_farm_keyboard(chat_id, uid, page))
+    # زمین خالیه — نشون بده چی تو انبار داره که بکاره
+    inv = get_inventory(chat_id, uid)
+    if not inv:
+        return await q.answer("📭 انبارت خالیه! اول یه پک تخم بخر.", show_alert=True)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{EGGS[t]['emoji']} {EGGS[t]['name']} ({n} تا)", callback_data=f"farm:plant:{page}:{num}:{t}")]
+        for t, n in inv.items()
+    ] + [[InlineKeyboardButton(text="⬅️ برگشت", callback_data=f"farm:page:{page}")]])
+    await q.message.edit_text(f"🌱 کدوم تخم رو تو این زمین بکاری؟", reply_markup=kb)
+    await q.answer()
+
+@dp.callback_query(F.data.startswith("farm:plant:"))
+async def farm_plant(q: CallbackQuery):
+    _, _, page, num, egg_type = q.data.split(":")
+    page, num = int(page), int(num)
+    chat_id, uid = q.message.chat.id, q.from_user.id
+    row = c.execute("SELECT count FROM farm_inventory WHERE chat_id=? AND user_id=? AND egg_type=?", (chat_id, uid, egg_type)).fetchone()
+    if not row or row[0] <= 0:
+        return await q.answer("❌ دیگه از این نداری!", show_alert=True)
+    c.execute("UPDATE farm_inventory SET count=count-1 WHERE chat_id=? AND user_id=? AND egg_type=?", (chat_id, uid, egg_type))
+    c.execute("INSERT INTO farm_tiles(chat_id,user_id,plot_num,egg_type,planted_at) VALUES(?,?,?,?,?)", (chat_id, uid, num, egg_type, int(time.time())))
+    db.commit()
+    await q.answer(f"🌱 {EGGS[egg_type]['name']} کاشته شد!")
+    await q.message.edit_text(build_farm_text(chat_id, uid), reply_markup=build_farm_keyboard(chat_id, uid, page))
 
 @dp.message(Command("loan"))
 async def loan(m:Message):
@@ -2098,6 +2351,7 @@ async def main():
         BotCommand(command="rank", description="🏅 رنک و پیشرفت روزانه"),
         BotCommand(command="ranktop", description="🏆 برترین‌های رنک گروه"),
         BotCommand(command="dicko", description="🍆 Dicko of the Day (رای‌گیری، ۲ بار در روز)"),
+        BotCommand(command="farm", description="🌾 پنل مزرعه‌ی اسپرم"),
         BotCommand(command="tosperm", description="🧬 تبدیل سانت به اسپرم"),
         BotCommand(command="tocent", description="💰 تبدیل اسپرم به سانت"),
         BotCommand(command="top", description="🏆 جدول بزرگان"),
