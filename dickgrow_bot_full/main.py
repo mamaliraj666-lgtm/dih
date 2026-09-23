@@ -49,24 +49,6 @@ c.execute("""CREATE TABLE IF NOT EXISTS rank_stats(
     last_active_day TEXT DEFAULT '',
     PRIMARY KEY(chat_id, user_id)
 )""")
-c.execute("""CREATE TABLE IF NOT EXISTS dicko_sessions(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    chat_id INTEGER,
-    active INTEGER DEFAULT 1,
-    created_at INTEGER
-)""")
-c.execute("""CREATE TABLE IF NOT EXISTS dicko_votes(
-    session_id INTEGER,
-    voter_id INTEGER,
-    candidate_id INTEGER,
-    PRIMARY KEY(session_id, voter_id)
-)""")
-c.execute("""CREATE TABLE IF NOT EXISTS dicko_daily(
-    chat_id INTEGER,
-    day TEXT,
-    count INTEGER DEFAULT 0,
-    PRIMARY KEY(chat_id, day)
-)""")
 c.execute("""CREATE TABLE IF NOT EXISTS loans(
     chat_id INTEGER,
     lender_id INTEGER,
@@ -118,6 +100,17 @@ c.execute("""CREATE TABLE IF NOT EXISTS farm_inventory(
     count INTEGER DEFAULT 0,
     PRIMARY KEY(chat_id, user_id, egg_type)
 )""")
+c.execute("""CREATE TABLE IF NOT EXISTS farm_records(
+    chat_id INTEGER,
+    user_id INTEGER,
+    eggs_bought INTEGER DEFAULT 0,
+    eggs_planted INTEGER DEFAULT 0,
+    eggs_harvested INTEGER DEFAULT 0,
+    total_harvest_value INTEGER DEFAULT 0,
+    plots_opened INTEGER DEFAULT 0,
+    spent_cm INTEGER DEFAULT 0,
+    PRIMARY KEY(chat_id, user_id)
+)""")
 db.commit()
 
 SPERM_RATE = 2  # ۱ سانت = ۲ اسپرم (واحد جداگانه‌ی بخش بورس)
@@ -164,8 +157,7 @@ HELP_SECTIONS = {
         "⚔️ /pvp [مبلغ شرط] — چالش دادن به یه نفر برای دوئل ۱ به ۱\n"
         "🏅 /rank — دیدن رنک، امتیاز (RP) و پیشرفت روزانه‌ت\n"
         "🏆 /ranktop — لیدربرد رنک گروه\n"
-        "🍆 /dicko — رای‌گیری «Dicko of the Day» (۲ بار در روز، جایزه بین برنده‌ها تقسیم می‌شه)\n\n"
-        "نکته: شانس بردت تو دوئل ثابت نیست — اگه زیادی برده باشی شانست کم می‌شه، اگه زیادی باخته باشی شانست زیاد می‌شه تا عادلانه بمونه."
+        "\nنکته: شانس بردت تو دوئل ثابت نیست — اگه زیادی برده باشی شانست کم می‌شه، اگه زیادی باخته باشی شانست زیاد می‌شه تا عادلانه بمونه."
     ),
     "mafia": (
         "🔫 مافیا",
@@ -204,7 +196,9 @@ HELP_SECTIONS = {
         "⏳ در حال رشد → بزن روش تا ببینی چقدر مونده\n"
         "✅ آماده‌ی برداشت → بزن روش تا اسپرم بگیری\n"
         "💀 فاسدشده → اگه دیر بجنبی نصف ارزشش رو می‌گیری\n\n"
-        "از همون پنل می‌تونی زمین جدید باز کنی، یه تخم تکی شانسی بخری (۵ سانت)، یا یه پک ۳تایی بخری (۳۰ سانت). رنگ‌های ارزون (⚪🟢) شانس دارن موقع برداشت یه تخم دیگه از خودشون بندازن؛ رنگ‌های کمیاب (🔵🟣🟡) هیچ‌وقت تکرار نمی‌شن ولی سودشون خیلی بیشتره."
+        "از همون پنل می‌تونی زمین جدید باز کنی، یه تخم تکی شانسی بخری (۵ سانت)، یا یه پک ۳تایی بخری (۳۰ سانت). رنگ‌های ارزون (⚪🟢) شانس دارن موقع برداشت یه تخم دیگه از خودشون بندازن؛ رنگ‌های کمیاب (🔵🟣🟡) هیچ‌وقت تکرار نمی‌شن ولی سودشون خیلی بیشتره.\n\n"
+        "🌾 /farmrank — رنک مزرعه‌ی خودت، بر اساس دقیقاً چیزی که الان تو زمین‌ها و انبارته\n"
+        "📊 /farmleader — جدول رنک مزرعه‌ی کل گروه"
     ),
 }
 
@@ -342,6 +336,27 @@ def get_inventory(chat_id, uid):
     rows = c.execute("SELECT egg_type,count FROM farm_inventory WHERE chat_id=? AND user_id=? AND count>0", (chat_id, uid)).fetchall()
     return {t: n for t, n in rows}
 
+def bump_farm_record(chat_id, uid, **deltas):
+    cols = ("eggs_bought", "eggs_planted", "eggs_harvested", "total_harvest_value", "plots_opened", "spent_cm")
+    c.execute(
+        f"INSERT INTO farm_records(chat_id,user_id,{','.join(cols)}) VALUES(?,?,{','.join(['0']*len(cols))}) "
+        "ON CONFLICT(chat_id,user_id) DO NOTHING",
+        (chat_id, uid)
+    )
+    for col, val in deltas.items():
+        if val:
+            c.execute(f"UPDATE farm_records SET {col}={col}+? WHERE chat_id=? AND user_id=?", (val, chat_id, uid))
+
+def get_farm_record(chat_id, uid):
+    row = c.execute(
+        "SELECT eggs_bought,eggs_planted,eggs_harvested,total_harvest_value,plots_opened,spent_cm "
+        "FROM farm_records WHERE chat_id=? AND user_id=?", (chat_id, uid)
+    ).fetchone()
+    if not row:
+        return {"eggs_bought": 0, "eggs_planted": 0, "eggs_harvested": 0, "total_harvest_value": 0, "plots_opened": 0, "spent_cm": 0}
+    keys = ("eggs_bought", "eggs_planted", "eggs_harvested", "total_harvest_value", "plots_opened", "spent_cm")
+    return dict(zip(keys, row))
+
 def plot_unlock_cost(owned):
     return PLOT_BASE_COST + 15 * max(0, owned - 2)
 
@@ -432,6 +447,7 @@ async def farm_unlock(q: CallbackQuery):
     if get_size(chat_id, uid) < cost:
         return await q.answer(f"❌ {cost} سانت لازم داری!", show_alert=True)
     c.execute("UPDATE users SET size=size-?, farm_plots=farm_plots+1 WHERE chat_id=? AND user_id=?", (cost, chat_id, uid))
+    bump_farm_record(chat_id, uid, plots_opened=1, spent_cm=cost)
     db.commit()
     await q.answer("✅ یه زمین جدید باز شد!")
     await q.message.edit_text(build_farm_text(chat_id, uid), reply_markup=build_farm_keyboard(chat_id, uid, page))
@@ -446,6 +462,7 @@ async def farm_buyegg(q: CallbackQuery):
     c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (EGG_SINGLE_COST, chat_id, uid))
     egg, surprise = roll_egg()
     add_egg_to_inventory(chat_id, uid, egg, 1)
+    bump_farm_record(chat_id, uid, eggs_bought=1, spent_cm=EGG_SINGLE_COST)
     db.commit()
     alert = f"🥚 گرفتی: {EGGS[egg]['emoji']} {EGGS[egg]['name']}!"
     if surprise:
@@ -468,6 +485,7 @@ async def farm_buypack(q: CallbackQuery):
         add_egg_to_inventory(chat_id, uid, egg, 1)
         results.append(egg)
         surprise = surprise or was_surprise
+    bump_farm_record(chat_id, uid, eggs_bought=EGG_PACK_SIZE, spent_cm=EGG_PACK_COST)
     db.commit()
     lines = "\n".join(f"{EGGS[e]['emoji']} {EGGS[e]['name']}" for e in results)
     alert = "🎉 پک باز شد:\n" + lines
@@ -494,6 +512,7 @@ async def farm_tile(q: CallbackQuery):
             gained //= 2
         c.execute("UPDATE users SET sperm=sperm+? WHERE chat_id=? AND user_id=?", (gained, chat_id, uid))
         c.execute("DELETE FROM farm_tiles WHERE chat_id=? AND user_id=? AND plot_num=?", (chat_id, uid, num))
+        bump_farm_record(chat_id, uid, eggs_harvested=1, total_harvest_value=gained)
         msg = f"{'💀 فاسد شده بود ولی بازم چیزی گیرت اومد!' if state=='spoiled' else '✅ برداشت شد!'}\n{info['emoji']} {info['name']}: +{gained} اسپرم"
         if info["replicate"] and random.randint(1, 100) <= info["replicate"]:
             add_egg_to_inventory(chat_id, uid, egg_type, 1)
@@ -522,9 +541,111 @@ async def farm_plant(q: CallbackQuery):
         return await q.answer("❌ دیگه از این نداری!", show_alert=True)
     c.execute("UPDATE farm_inventory SET count=count-1 WHERE chat_id=? AND user_id=? AND egg_type=?", (chat_id, uid, egg_type))
     c.execute("INSERT INTO farm_tiles(chat_id,user_id,plot_num,egg_type,planted_at) VALUES(?,?,?,?,?)", (chat_id, uid, num, egg_type, int(time.time())))
+    bump_farm_record(chat_id, uid, eggs_planted=1)
     db.commit()
     await q.answer(f"🌱 {EGGS[egg_type]['name']} کاشته شد!")
     await q.message.edit_text(build_farm_text(chat_id, uid), reply_markup=build_farm_keyboard(chat_id, uid, page))
+
+# ===== رنک مزرعه بر اساس وضعیت فعلی پنل =====
+FARM_RANK_TIERS = [
+    (0,    "🌱 نوزمین‌دار"),
+    (100,  "🌾 کشاورز"),
+    (300,  "🚜 تراکتوردار"),
+    (700,  "🏭 صنعتی"),
+    (1500, "👑 پادشاه مزرعه"),
+]
+
+def egg_avg_value(egg_type):
+    info = EGGS[egg_type]
+    return (info["min"] + info["max"]) / 2
+
+def get_farm_tier(worth):
+    tier = FARM_RANK_TIERS[0][1]
+    for threshold, name in FARM_RANK_TIERS:
+        if worth >= threshold:
+            tier = name
+    return tier
+
+def compute_farm_stats(chat_id, uid):
+    """محاسبه‌ی زنده‌ی وضعیت فعلی مزرعه: هرچی الان تو زمین‌ها و انبار داره."""
+    row = c.execute("SELECT farm_plots FROM users WHERE chat_id=? AND user_id=?", (chat_id, uid)).fetchone()
+    plots_owned = row[0] if row else 2
+    tiles = c.execute("SELECT egg_type,planted_at FROM farm_tiles WHERE chat_id=? AND user_id=?", (chat_id, uid)).fetchall()
+    growing = ready = spoiled = 0
+    tile_worth = 0.0
+    for egg_type, planted_at in tiles:
+        state, _ = tile_state(egg_type, planted_at)
+        val = egg_avg_value(egg_type)
+        if state == "growing":
+            growing += 1
+            tile_worth += val
+        elif state == "ready":
+            ready += 1
+            tile_worth += val
+        else:
+            spoiled += 1
+            tile_worth += val / 2
+    inv = get_inventory(chat_id, uid)
+    inv_count = sum(inv.values())
+    inv_worth = sum(egg_avg_value(t) * n for t, n in inv.items())
+    net_worth = round(tile_worth + inv_worth)
+    return {
+        "plots_owned": plots_owned, "growing": growing, "ready": ready, "spoiled": spoiled,
+        "planted": len(tiles), "inv_count": inv_count, "net_worth": net_worth,
+    }
+
+@dp.message(Command("farmrank"))
+async def farm_rank_cmd(m: Message):
+    user(m.chat.id, m.from_user.id, m.from_user.full_name)
+    st = compute_farm_stats(m.chat.id, m.from_user.id)
+    rec = get_farm_record(m.chat.id, m.from_user.id)
+    tier = get_farm_tier(st["net_worth"])
+    await m.reply(
+        f"🌾 رنک مزرعه‌ی شما\n\n"
+        f"{tier}\n"
+        f"💰 ارزش خالص فعلی: {st['net_worth']} اسپرم (تخمینی)\n"
+        f"🟫 زمین‌های باز: {st['plots_owned']}\n"
+        f"🌱 کاشته‌شده الان: {st['planted']} (⏳{st['growing']} در حال رشد | ✅{st['ready']} آماده | 💀{st['spoiled']} فاسد)\n"
+        f"📦 تخم تو انبار: {st['inv_count']}\n\n"
+        f"📜 رکورد کلی (از اول تا الان):\n"
+        f"🥚 تخم خریده: {rec['eggs_bought']}\n"
+        f"🌱 تخم کاشته: {rec['eggs_planted']}\n"
+        f"🌾 تخم برداشت‌کرده: {rec['eggs_harvested']}\n"
+        f"💰 کل اسپرم به‌دست‌اومده از برداشت: {rec['total_harvest_value']}\n"
+        f"🟫 کل زمین‌های باز‌شده: {rec['plots_opened']}\n"
+        f"💸 کل سانت خرج‌شده تو مزرعه: {rec['spent_cm']}"
+    )
+
+@dp.message(Command("farmleader"))
+async def farm_leaderboard(m: Message):
+    chat_id = m.chat.id
+    candidates = c.execute(
+        "SELECT DISTINCT user_id FROM ("
+        "  SELECT user_id FROM farm_tiles WHERE chat_id=?"
+        "  UNION SELECT user_id FROM farm_inventory WHERE chat_id=? AND count>0"
+        "  UNION SELECT user_id FROM users WHERE chat_id=? AND farm_plots>2"
+        ")", (chat_id, chat_id, chat_id)
+    ).fetchall()
+    if not candidates:
+        return await m.reply("📭 هنوز کسی تو این گروه مزرعه راه ننداخته!")
+    board = []
+    for (uid,) in candidates:
+        st = compute_farm_stats(chat_id, uid)
+        board.append((uid, st))
+    board.sort(key=lambda x: x[1]["net_worth"], reverse=True)
+    txt = "📊 جدول رنک مزرعه‌ی این گروه\n\n"
+    for i, (uid, st) in enumerate(board[:10], 1):
+        name = get_name(chat_id, uid)
+        rec = get_farm_record(chat_id, uid)
+        tier = get_farm_tier(st["net_worth"])
+        txt += (
+            f"{i}. {name}\n"
+            f"   {tier}\n"
+            f"   💰 ارزش الان: {st['net_worth']} اسپرم | 🟫 زمین: {st['plots_owned']} | "
+            f"🌱 کاشته: {st['planted']} (✅{st['ready']}/⏳{st['growing']}/💀{st['spoiled']}) | 📦 انبار: {st['inv_count']}\n"
+            f"   📜 رکورد: {rec['eggs_harvested']} برداشت | {rec['total_harvest_value']} اسپرم کل | {rec['plots_opened']} زمین باز‌شده\n\n"
+        )
+    await m.reply(txt)
 
 @dp.message(Command("loan"))
 async def loan(m:Message):
@@ -700,104 +821,6 @@ async def rank_top(m: Message):
         name = get_name(m.chat.id, uid)
         txt += f"{i}. {name} — {rp} RP ({get_rank_tier(rp)})\n"
     await m.reply(txt)
-
-# ===== Dicko of the Day (رای‌گیری روزانه) =====
-DICKO_DAILY_LIMIT = 2      # چند بار در روز میشه این رای‌گیری رو برگزار کرد
-DICKO_VOTE_SECONDS = 300   # مدت زمان باز بودن رای‌گیری (۵ دقیقه)
-DICKO_PRIZE = 50           # جایزه‌ی سانت برای برنده
-DICKO_MAX_CANDIDATES = 10  # حداکثر تعداد گزینه‌ها تو دکمه‌ها
-
-@dp.message(Command("dicko"))
-async def dicko_start(m: Message):
-    if m.chat.type == "private":
-        return await m.reply("❌ این دستور فقط تو گروه کار می‌کنه.")
-    today = today_str()
-    row = c.execute("SELECT count FROM dicko_daily WHERE chat_id=? AND day=?", (m.chat.id, today)).fetchone()
-    used = row[0] if row else 0
-    if used >= DICKO_DAILY_LIMIT:
-        return await m.reply(f"❌ رای‌گیری Dicko of the Day امروز {DICKO_DAILY_LIMIT} بار برگزار شده، فردا دوباره امتحان کن!")
-    candidates = c.execute(
-        "SELECT user_id,name FROM users WHERE chat_id=? ORDER BY size DESC LIMIT ?",
-        (m.chat.id, DICKO_MAX_CANDIDATES)
-    ).fetchall()
-    if len(candidates) < 2:
-        return await m.reply("❌ به‌اندازه‌ی کافی بازیکن تو این گروه فعالیت نکرده تا رای‌گیری برگزار بشه.")
-    cur = c.execute("INSERT INTO dicko_sessions(chat_id,active,created_at) VALUES(?,1,?)", (m.chat.id, int(time.time())))
-    if row:
-        c.execute("UPDATE dicko_daily SET count=count+1 WHERE chat_id=? AND day=?", (m.chat.id, today))
-    else:
-        c.execute("INSERT INTO dicko_daily(chat_id,day,count) VALUES(?,?,1)", (m.chat.id, today))
-    db.commit()
-    sid = cur.lastrowid
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=name, callback_data=f"dickovote:{sid}:{uid}")]
-        for uid, name in candidates
-    ])
-    minutes = DICKO_VOTE_SECONDS // 60
-    sent = await m.reply(
-        f"🍆 Dicko of the Day شروع شد!\n\n"
-        f"رای بدید کدومتون امروز «Dicko» گروهه!\n"
-        f"🏆 برنده {DICKO_PRIZE} سانت می‌گیره.\n"
-        f"⏳ {minutes} دقیقه وقت دارید رای بدید. (دفعه‌ی {used+1} از {DICKO_DAILY_LIMIT} امروز)",
-        reply_markup=kb
-    )
-    asyncio.create_task(dicko_close_later(m.bot, sid, m.chat.id, sent.message_id))
-
-@dp.callback_query(F.data.startswith("dickovote:"))
-async def dicko_vote(q: CallbackQuery):
-    _, sid, cand = q.data.split(":")
-    sid = int(sid); cand = int(cand)
-    row = c.execute("SELECT active FROM dicko_sessions WHERE id=?", (sid,)).fetchone()
-    if not row or row[0] == 0:
-        return await q.answer("⌛️ این رای‌گیری تموم شده!", show_alert=True)
-    if q.from_user.id == cand:
-        return await q.answer("❌ نمیتونی به خودت رای بدی!", show_alert=True)
-    c.execute(
-        "INSERT INTO dicko_votes(session_id,voter_id,candidate_id) VALUES(?,?,?) "
-        "ON CONFLICT(session_id,voter_id) DO UPDATE SET candidate_id=excluded.candidate_id",
-        (sid, q.from_user.id, cand)
-    )
-    db.commit()
-    await q.answer("✅ رایت ثبت شد!")
-
-async def dicko_close_later(bot, sid, chat_id, msg_id):
-    await asyncio.sleep(DICKO_VOTE_SECONDS)
-    row = c.execute("SELECT active FROM dicko_sessions WHERE id=?", (sid,)).fetchone()
-    if not row or row[0] == 0:
-        return
-    results = c.execute(
-        "SELECT candidate_id, COUNT(*) c FROM dicko_votes WHERE session_id=? GROUP BY candidate_id ORDER BY c DESC",
-        (sid,)
-    ).fetchall()
-    c.execute("UPDATE dicko_sessions SET active=0 WHERE id=?", (sid,))
-    db.commit()
-    if not results:
-        try:
-            await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text="🍆 Dicko of the Day\n\n😶 کسی رای نداد، این دور بدون برنده تموم شد.")
-        except Exception:
-            pass
-        return
-    top_votes = results[0][1]
-    winners = [uid for uid, cnt in results if cnt == top_votes]
-    share = DICKO_PRIZE // len(winners)
-    for uid in winners:
-        c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (share, chat_id, uid))
-    db.commit()
-    txt = "🍆 نتیجه‌ی Dicko of the Day!\n\n"
-    for uid, cnt in results[:10]:
-        n = get_name(chat_id, uid)
-        crown = "👑 " if uid in winners else ""
-        txt += f"{crown}{n}: {cnt} رای\n"
-    if len(winners) > 1:
-        winner_names = "، ".join(get_name(chat_id, uid) for uid in winners)
-        txt += f"\n🏆 مساوی شد! Dicko امروز: {winner_names}! (هرکدوم +{share} سانت)"
-    else:
-        winner_name = get_name(chat_id, winners[0])
-        txt += f"\n🏆 Dicko امروز: {winner_name}! (+{share} سانت)"
-    try:
-        await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=txt)
-    except Exception:
-        pass
 
 @dp.message(Command("pvp"))
 async def pvp(m:Message):
@@ -1822,23 +1845,22 @@ async def reset_group(m: Message):
     if len(parts) < 2 or parts[1] != "CONFIRM":
         return await m.reply(
             "⚠️ این کار همه‌ی داده‌های این گروه رو کاملاً و برای همیشه پاک می‌کنه:\n"
-            "سایز/اسپرم همه، رنک، مافیا، بورس، کلکسیون سلبریتی‌ها، وام‌ها و Dicko.\n\n"
+            "سایز/اسپرم همه، رنک، مافیا، بورس، کلکسیون سلبریتی‌ها، وام‌ها و مزرعه.\n\n"
             "اگه مطمئنی، بنویس:\n/resetgroup CONFIRM"
         )
     chat_id = m.chat.id
     # جدول‌هایی که مستقیم ستون chat_id دارن
     for table in (
-        "users", "pvp_stats", "rank_stats", "dicko_daily", "loans", "listings",
+        "users", "pvp_stats", "rank_stats", "loans", "listings",
         "game_loans", "mafia_battles", "mafia2_battles", "collections",
         "company_rounds", "company_options", "company_investments",
         "company_participants", "owned_companies",
+        "farm_tiles", "farm_inventory", "farm_records",
     ):
         c.execute(f"DELETE FROM {table} WHERE chat_id=?", (chat_id,))
-    # جدول‌هایی که فقط از طریق battle_id/session_id به گروه وصلن
+    # جدول‌هایی که فقط از طریق battle_id به گروه وصلن
     c.execute("DELETE FROM mafia_members WHERE battle_id IN (SELECT id FROM mafia_battles WHERE chat_id=?)", (chat_id,))
     c.execute("DELETE FROM mafia2_members WHERE battle_id IN (SELECT id FROM mafia2_battles WHERE chat_id=?)", (chat_id,))
-    c.execute("DELETE FROM dicko_votes WHERE session_id IN (SELECT id FROM dicko_sessions WHERE chat_id=?)", (chat_id,))
-    c.execute("DELETE FROM dicko_sessions WHERE chat_id=?", (chat_id,))
     db.commit()
     await m.reply("✅ همه‌ی داده‌های این گروه پاک شد. بازی از صفر شروع می‌شه.")
 
@@ -2350,8 +2372,9 @@ async def main():
         BotCommand(command="size", description="📊 اندازه و پروفایل"),
         BotCommand(command="rank", description="🏅 رنک و پیشرفت روزانه"),
         BotCommand(command="ranktop", description="🏆 برترین‌های رنک گروه"),
-        BotCommand(command="dicko", description="🍆 Dicko of the Day (رای‌گیری، ۲ بار در روز)"),
         BotCommand(command="farm", description="🌾 پنل مزرعه‌ی اسپرم"),
+        BotCommand(command="farmrank", description="🌾 رنک مزرعه‌ی من (زنده)"),
+        BotCommand(command="farmleader", description="📊 جدول رنک مزرعه‌ی گروه"),
         BotCommand(command="tosperm", description="🧬 تبدیل سانت به اسپرم"),
         BotCommand(command="tocent", description="💰 تبدیل اسپرم به سانت"),
         BotCommand(command="top", description="🏆 جدول بزرگان"),
