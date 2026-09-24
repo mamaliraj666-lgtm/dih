@@ -180,9 +180,9 @@ HELP_SECTIONS = {
     ),
     "bourse": (
         "📈 بورس",
-        "📈 /copen — باز کردن یه دور بورس (ادمین)\n"
-        "🧬 /invest — سرمایه‌گذاری مخفیانه روی یه شرکت (با اسپرم، از طریق پیوی)\n"
-        "📉 /cclose — بستن بورس و اعلام برنده‌ها (ادمین)\n"
+        "📈 /copen — باز کردن یه بازار بورس جدید (ادمین، می‌شه چندتا رو همزمان باز داشت)\n"
+        "🧬 /invest — سرمایه‌گذاری مخفیانه روی یه شرکت (با اسپرم، از طریق پیوی؛ اگه چندتا بازار همزمان باز باشه اول انتخاب می‌کنی کدوم)\n"
+        "📉 /cclose [شماره بازار] — بستن یه بازار خاص و اعلام برنده‌ها (ادمین؛ اگه فقط یکی باز باشه نیازی به شماره نیست)\n"
         "🏢 /mycompanies — شرکت‌هایی که بردی\n"
         "📊 /bourseleader — جدول رنک بورس گروه (ارزش خالص، تعداد شرکت، بردها، سود روزانه)\n"
         "🕵️ /useyar — فرستادن یه یار (کارگر) از شرکتت به یه نبرد مافیای فعلیت\n"
@@ -1965,10 +1965,11 @@ COMPANY_NAME_POOL = [
 ]
 
 c.execute("""CREATE TABLE IF NOT EXISTS company_rounds(
-    chat_id INTEGER PRIMARY KEY,
+    chat_id INTEGER,
     round_id INTEGER DEFAULT 0,
     status TEXT DEFAULT 'closed',
-    open_time INTEGER DEFAULT 0
+    open_time INTEGER DEFAULT 0,
+    PRIMARY KEY(chat_id, round_id)
 )""")
 c.execute("""CREATE TABLE IF NOT EXISTS company_options(
     chat_id INTEGER,
@@ -2013,6 +2014,21 @@ except sqlite3.OperationalError:
     pass
 db.commit()
 
+# اگه دیتابیس قدیمی هنوز اسکیمای تک-بازاره (chat_id تنها کلید اصلی)، منتقلش کن به اسکیمای چندبازاره
+_pk_cols = [row[1] for row in c.execute("PRAGMA table_info(company_rounds)").fetchall() if row[5] > 0]
+if _pk_cols == ["chat_id"]:
+    c.execute("ALTER TABLE company_rounds RENAME TO company_rounds_old_single")
+    c.execute("""CREATE TABLE company_rounds(
+        chat_id INTEGER,
+        round_id INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'closed',
+        open_time INTEGER DEFAULT 0,
+        PRIMARY KEY(chat_id, round_id)
+    )""")
+    c.execute("INSERT INTO company_rounds(chat_id,round_id,status,open_time) SELECT chat_id,round_id,status,open_time FROM company_rounds_old_single")
+    c.execute("DROP TABLE company_rounds_old_single")
+    db.commit()
+
 ALLY_NAME_POOL = [
     "یار خفن شرکت", "پسرعموی کلفت", "کارمند بی‌سروپا", "یارِ زیرِ میزی",
     "بادیگارد کیری", "همکار مشکوک", "یار قاچاقی", "کارگر شیفت شب",
@@ -2043,36 +2059,38 @@ def find_active_membership(chat_id, uid):
     return None
 
 
-def get_round(chat_id):
-    row = c.execute("SELECT round_id,status,open_time FROM company_rounds WHERE chat_id=?", (chat_id,)).fetchone()
-    if not row:
-        c.execute("INSERT INTO company_rounds(chat_id,round_id,status,open_time) VALUES(?,0,'closed',0)", (chat_id,))
-        db.commit()
-        return (0, 'closed', 0)
-    return row
+def get_open_rounds(chat_id):
+    """لیست همه‌ی بازارهایی که همین الان تو این گروه بازن."""
+    return c.execute(
+        "SELECT round_id, open_time FROM company_rounds WHERE chat_id=? AND status='open' ORDER BY round_id",
+        (chat_id,)
+    ).fetchall()
+
+def get_round_status(chat_id, round_id):
+    row = c.execute("SELECT status FROM company_rounds WHERE chat_id=? AND round_id=?", (chat_id, round_id)).fetchone()
+    return row[0] if row else None
+
+def next_round_id(chat_id):
+    row = c.execute("SELECT MAX(round_id) FROM company_rounds WHERE chat_id=?", (chat_id,)).fetchone()
+    return (row[0] or 0) + 1
 
 
 @dp.message(Command("copen"))
 async def company_open(m: Message):
     if m.from_user.id not in ADMIN_IDS:
         return await m.reply("❌ فقط ادمین می‌تونه بازار رو باز کنه!")
-    round_id, status, open_time = get_round(m.chat.id)
     now = int(time.time())
-    if status == 'open':
-        return await m.reply("📈 بازار همین الان بازه! اول با /cclose ببندش.")
-    new_round = round_id + 1
+    new_round = next_round_id(m.chat.id)
     names = random.sample(COMPANY_NAME_POOL, 4)
-    c.execute("DELETE FROM company_options WHERE chat_id=?", (m.chat.id,))
-    c.execute("DELETE FROM company_investments WHERE chat_id=?", (m.chat.id,))
-    c.execute("DELETE FROM company_participants WHERE chat_id=?", (m.chat.id,))
     min_budgets = []
     for i, name in enumerate(names, 1):
         mb = random.randint(COMPANY_MIN_BUDGET_LOW, COMPANY_MIN_BUDGET_HIGH)
         min_budgets.append(mb)
         c.execute("INSERT INTO company_options(chat_id,round_id,slot,name,min_budget) VALUES(?,?,?,?,?)", (m.chat.id, new_round, i, name, mb))
-    c.execute("UPDATE company_rounds SET round_id=?,status='open',open_time=? WHERE chat_id=?", (new_round, now, m.chat.id))
+    c.execute("INSERT INTO company_rounds(chat_id,round_id,status,open_time) VALUES(?,?,'open',?)", (m.chat.id, new_round, now))
     db.commit()
-    txt = "📈 بازار بورس کیر باز شد!\n\n"
+    open_count = len(get_open_rounds(m.chat.id))
+    txt = f"📈 یه بازار بورس جدید باز شد! (بازار شماره‌ی #{new_round})\n\n"
     for i, (name, mb) in enumerate(zip(names, min_budgets), 1):
         txt += f"{i}. {name} (حداقل بودجه: {mb} اسپرم)\n"
     txt += (
@@ -2081,45 +2099,79 @@ async def company_open(m: Message):
         f"برای سرمایه‌گذاری فقط بنویس /invest (بدون هیچ عددی!)\n"
         f"ربات میاد پیوی خصوصی باهات هماهنگ می‌کنه که کسی نفهمه رو چی و چقدر سرمایه‌گذاری کردی."
     )
+    if open_count > 1:
+        txt += f"\n\n📊 الان {open_count} تا بازار همزمان باز هستن تو این گروه."
     await m.reply(txt)
 
+
+def build_company_picker_kb(chat_id, round_id):
+    opts = c.execute("SELECT slot,name FROM company_options WHERE chat_id=? AND round_id=? ORDER BY slot", (chat_id, round_id)).fetchall()
+    return opts, InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{slot}. {name}", callback_data=f"investpick:{chat_id}:{round_id}:{slot}")]
+        for slot, name in opts
+    ])
 
 @dp.message(Command("invest"))
 async def company_invest_start(m: Message):
     if m.chat.type == "private":
         return await m.reply("❌ این دستور رو باید توی همون گروهی که بازی می‌کنی بزنی.")
-    round_id, status, open_time = get_round(m.chat.id)
-    if status != 'open':
-        return await m.reply("❌ الان بازاری باز نیست!")
+    open_rounds = get_open_rounds(m.chat.id)
+    if not open_rounds:
+        return await m.reply("❌ الان هیچ بازاری باز نیست!")
     user(m.chat.id, m.from_user.id, m.from_user.full_name)
-    opts = c.execute("SELECT slot,name FROM company_options WHERE chat_id=? AND round_id=? ORDER BY slot", (m.chat.id, round_id)).fetchall()
-    if not opts:
-        return await m.reply("❌ شرکتی برای این دور پیدا نشد.")
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{slot}. {name}", callback_data=f"investpick:{m.chat.id}:{round_id}:{slot}")]
-        for slot, name in opts
-    ])
     tip = ""
     if len(m.text.split()) > 1:
         tip = "\n\n💡 دیگه لازم نیست بعد /invest عدد بنویسی — کل انتخاب رو همینجا با دکمه انجام بده."
+
+    if len(open_rounds) == 1:
+        round_id = open_rounds[0][0]
+        opts, kb = build_company_picker_kb(m.chat.id, round_id)
+        if not opts:
+            return await m.reply("❌ شرکتی برای این بازار پیدا نشد.")
+        try:
+            await m.bot.send_message(
+                m.from_user.id,
+                "📈 روی کدوم شرکت می‌خوای سرمایه‌گذاری کنی؟\n(این پیام فقط برای خودته)" + tip,
+                reply_markup=kb
+            )
+        except (TelegramForbiddenError, TelegramBadRequest):
+            return await m.reply("❌ اول باید ربات رو توی پیوی (چت خصوصی) استارت کنی، بعد دوباره اینجا /invest بزن.")
+        return await m.reply("📩 برات پیام خصوصی فرستادم! بقیه‌ی سرمایه‌گذاری رو اونجا انجام بده تا لو نره.")
+
+    # چندتا بازار همزمان باز هستن — اول باید انتخاب کنه کدوم رو می‌خواد
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"📈 بازار #{rid}", callback_data=f"investmarket:{m.chat.id}:{rid}")]
+        for rid, _ in open_rounds
+    ])
     try:
         await m.bot.send_message(
             m.from_user.id,
-            "📈 روی کدوم شرکت می‌خوای سرمایه‌گذاری کنی؟\n(این پیام فقط برای خودته)" + tip,
+            f"📊 الان {len(open_rounds)} تا بازار همزمان باز هستن. کدومش رو می‌خوای سرمایه‌گذاری کنی؟" + tip,
             reply_markup=kb
         )
     except (TelegramForbiddenError, TelegramBadRequest):
         return await m.reply("❌ اول باید ربات رو توی پیوی (چت خصوصی) استارت کنی، بعد دوباره اینجا /invest بزن.")
     await m.reply("📩 برات پیام خصوصی فرستادم! بقیه‌ی سرمایه‌گذاری رو اونجا انجام بده تا لو نره.")
 
+@dp.callback_query(F.data.startswith("investmarket:"))
+async def company_invest_pick_market(q: CallbackQuery):
+    _, chat_id, round_id = q.data.split(":")
+    chat_id, round_id = int(chat_id), int(round_id)
+    if get_round_status(chat_id, round_id) != "open":
+        return await q.answer("❌ این بازار دیگه بسته شده.", show_alert=True)
+    opts, kb = build_company_picker_kb(chat_id, round_id)
+    if not opts:
+        return await q.answer("❌ شرکتی برای این بازار پیدا نشد.", show_alert=True)
+    await q.message.edit_text(f"📈 بازار #{round_id} — روی کدوم شرکت می‌خوای سرمایه‌گذاری کنی؟", reply_markup=kb)
+    await q.answer()
+
 
 @dp.callback_query(F.data.startswith("investpick:"))
 async def company_invest_pick(q: CallbackQuery):
     _, chat_id, round_id, slot = q.data.split(":")
     chat_id, round_id, slot = int(chat_id), int(round_id), int(slot)
-    cur_round_id, status, open_time = get_round(chat_id)
-    if status != 'open' or cur_round_id != round_id:
-        return await q.answer("❌ این دور بازار دیگه بسته یا منقضی شده.", show_alert=True)
+    if get_round_status(chat_id, round_id) != "open":
+        return await q.answer("❌ این بازار دیگه بسته یا منقضی شده.", show_alert=True)
     opt = c.execute("SELECT name FROM company_options WHERE chat_id=? AND round_id=? AND slot=?", (chat_id, round_id, slot)).fetchone()
     if not opt:
         return await q.answer("❌ همچین شرکتی پیدا نشد.", show_alert=True)
@@ -2140,10 +2192,9 @@ async def company_invest_amount(m: Message):
     chat_id, round_id, slot = pending["chat_id"], pending["round_id"], pending["slot"]
     if amount <= 0:
         return await m.reply("❌ مقدار باید مثبت باشه.")
-    cur_round_id, status, open_time = get_round(chat_id)
-    if status != 'open' or cur_round_id != round_id:
+    if get_round_status(chat_id, round_id) != "open":
         del pending_invest[m.from_user.id]
-        return await m.reply("❌ بازار اون گروه بسته یا عوض شده، دوباره از توی گروه /invest بزن.")
+        return await m.reply("❌ اون بازار بسته شده، دوباره از توی گروه /invest بزن.")
     opt = c.execute("SELECT name FROM company_options WHERE chat_id=? AND round_id=? AND slot=?", (chat_id, round_id, slot)).fetchone()
     if not opt:
         del pending_invest[m.from_user.id]
@@ -2172,9 +2223,17 @@ async def company_invest_amount(m: Message):
 async def company_close(m: Message):
     if m.from_user.id not in ADMIN_IDS:
         return await m.reply("❌ فقط ادمین می‌تونه بازار رو ببنده!")
-    round_id, status, open_time = get_round(m.chat.id)
-    if status != 'open':
-        return await m.reply("❌ بازاری باز نیست.")
+    open_rounds = get_open_rounds(m.chat.id)
+    if not open_rounds:
+        return await m.reply("❌ هیچ بازاری باز نیست.")
+    parts = m.text.split()
+    if len(open_rounds) == 1:
+        round_id = open_rounds[0][0]
+    elif len(parts) > 1 and parts[1].isdigit() and int(parts[1]) in {r for r, _ in open_rounds}:
+        round_id = int(parts[1])
+    else:
+        listing = "\n".join(f"• #{r}" for r, _ in open_rounds)
+        return await m.reply(f"📊 چندتا بازار همزمان بازه، مشخص کن کدومو ببندم:\n{listing}\n\nمثال: /cclose {open_rounds[0][0]}")
     opts = c.execute("SELECT slot,name,min_budget FROM company_options WHERE chat_id=? AND round_id=?", (m.chat.id, round_id)).fetchall()
     if not opts:
         return await m.reply("❌ شرکتی برای این دور پیدا نشد.")
@@ -2190,7 +2249,7 @@ async def company_close(m: Message):
             eliminated.add(slot)
 
     now = int(time.time())
-    txt = "📉 نتیجه‌ی بازار بورس!\n\n"
+    txt = f"📉 نتیجه‌ی بازار بورس #{round_id}!\n\n"
     for slot, (name, total, min_budget) in totals.items():
         if slot in eliminated:
             reason = "گنده شد و ترکید 💥" if slot == max_slot else f"به حداقل بودجه‌ش ({min_budget} اسپرم) نرسید 📉"
@@ -2212,7 +2271,7 @@ async def company_close(m: Message):
         winner_name = get_name(m.chat.id, winner_id)
         txt += f"👑 {name} ({total} اسپرم) — برنده: {winner_name} (سهم {winner_amount} اسپرم)\n"
 
-    c.execute("UPDATE company_rounds SET status='closed' WHERE chat_id=?", (m.chat.id,))
+    c.execute("UPDATE company_rounds SET status='closed' WHERE chat_id=? AND round_id=?", (m.chat.id, round_id))
     db.commit()
     await m.reply(txt)
 
