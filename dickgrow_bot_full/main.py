@@ -196,7 +196,7 @@ HELP_SECTIONS = {
         "⏳ در حال رشد → بزن روش تا ببینی چقدر مونده\n"
         "✅ آماده‌ی برداشت → بزن روش تا اسپرم بگیری\n"
         "💀 فاسدشده → اگه دیر بجنبی نصف ارزشش رو می‌گیری\n\n"
-        "از همون پنل می‌تونی زمین جدید باز کنی، یه تخم تکی شانسی بخری (۷ سانت)، یا یه پک ۳تایی بخری (۳۰ سانت). رنگ‌های ارزون (⚪🟢) شانس دارن موقع برداشت یه تخم دیگه از خودشون بندازن؛ بقیه (🔷🔵🟪🟣🟡) هیچ‌وقت تکرار نمی‌شن ولی سودشون بیشتره — هرچی کمیاب‌تر، دیرتر می‌رسه ولی سودش نامتناسب بیشتره.\n\n"
+        "از همون پنل می‌تونی زمین جدید باز کنی، یه تخم تکی شانسی بخری (۷ سانت)، یا یه پک ۳تایی بخری (۴۰ سانت). رنگ‌های ارزون (⚪🟢) شانس دارن موقع برداشت یه تخم دیگه از خودشون بندازن؛ بقیه (🔷🔵🟪🟣🟡) هیچ‌وقت تکرار نمی‌شن ولی سودشون بیشتره — هرچی کمیاب‌تر، دیرتر می‌رسه ولی سودش نامتناسب بیشتره.\n\n"
         "🌾 /farmrank — رنک مزرعه‌ی خودت، بر اساس دقیقاً چیزی که الان تو زمین‌ها و انبارته\n"
         "📊 /farmleader — جدول رنک مزرعه‌ی کل گروه"
     ),
@@ -315,7 +315,7 @@ EGG_SURPRISE_CHANCE = 0.02   # شانس اینکه یه تخم ارزون در �
 FARM_SPOIL_MULTIPLIER = 2    # بعد این‌قدر برابر زمان اصلی، تخم فاسد میشه و نصف ارزش میده
 FARM_PAGE_SIZE = 9           # هر صفحه از پنل چندتا خونه نشون بده (۳ در ۳)
 EGG_SINGLE_COST = 7          # هزینه‌ی یه تخم تکی شانسی
-EGG_PACK_COST = 30           # هزینه‌ی هر پک (۳ تخم شانسی)
+EGG_PACK_COST = 40           # هزینه‌ی هر پک (۳ تخم شانسی)
 EGG_PACK_SIZE = 3
 PLOT_BASE_COST = 20          # هزینه‌ی باز کردن اولین زمین‌های اضافه؛ هرچی بیشتر داشته باشی گرون‌تر میشه
 
@@ -1213,13 +1213,13 @@ CELEBS = {
     "Madison Beer": ("A",350,262,"AgACAgQAAxkBAAEiix5qpry4N-XRCC1BeUeGrBacwO1PxwAC8Q9rGxHWOFEiXTj03FeFEAEAAwIAA3MAAz0E"),
     "Sadie Sink": ("A",350,262,"AgACAgQAAxkBAAEiLFJqlZEGt1mG9G15PgKP4PPhQcRm-gACARBrG8igqVCvW3ZnrKAGywEAAwIAA3MAAz0E"),
     "Scarlett Johansson": ("A",350,262,"AgACAgQAAxkBAAEijSBqpwXof-3vjZeK_61sIm9brMrWWwAC5Q9rG_HjOVGRBdU_77rF8wEAAwIAA3MAAz0E"),
-    "Anne Hathaway": ("B",525,262,"AgACAgQAAxkBAAEiLHJqlZLNXRVWSN-k7xu-doS7FTDsbgACCRBrG8igqVDk8fgU3uXUFwEAAwIAA3MAAz0E"),
-    "Elizabeth Olsen": ("B",525,262,"AgACAgQAAxkBAAEiLHRqlZNem1Ue0rp7IJ182xumcv2XKwACChBrG8igqVDyu9zwySffJAEAAwIAA3MAAz0E"),
-    "Olivia Rodrigo": ("B",525,262,"AgACAgQAAxkBAAEiLHZqlZPReBV1oF2fHUcz1MiKfWTuPAACCxBrG8igqVDsVdcPA4GFUAEAAwIAA3MAAz0E"),
-    "Emma Watson": ("B",525,262,"AgACAgQAAxkBAAEiLHpqlZRQeIXIaNZcdp3gXLdrXT2anAACDRBrG8igqVC08ITVIg9XMAEAAwIAA3MAAz0E"),
-    "Leah Halton": ("B",525,262,"AgACAgQAAxkBAAEiiyhqpr1II4KnLYGLp4wwWO25ZUjnMwAC8w9rGxHWOFHnxgG03-TRhAEAAwIAA3MAAz0E"),
-    "Ashlyn Castro": ("B",525,262,"AgACAgQAAxkBAAEiiypqpr2gKFikU1gkAAFPisEKVaAKA5oAAvQPaxsR1jhRLB-aZnzbFkIBAAMCAANtAAM9BA"),
-    "Kristen Stewart": ("B",525,262,"AgACAgQAAxkBAAEiLHxqlZSorrGyLnSOBdRqRqdnSvnaXgACDxBrG8igqVDQHpTLZKuoOwEAAwIAA3MAAz0E"),
+    "Anne Hathaway": ("B",175,88,"AgACAgQAAxkBAAEiLHJqlZLNXRVWSN-k7xu-doS7FTDsbgACCRBrG8igqVDk8fgU3uXUFwEAAwIAA3MAAz0E"),
+    "Elizabeth Olsen": ("B",175,88,"AgACAgQAAxkBAAEiLHRqlZNem1Ue0rp7IJ182xumcv2XKwACChBrG8igqVDyu9zwySffJAEAAwIAA3MAAz0E"),
+    "Olivia Rodrigo": ("B",175,88,"AgACAgQAAxkBAAEiLHZqlZPReBV1oF2fHUcz1MiKfWTuPAACCxBrG8igqVDsVdcPA4GFUAEAAwIAA3MAAz0E"),
+    "Emma Watson": ("B",175,88,"AgACAgQAAxkBAAEiLHpqlZRQeIXIaNZcdp3gXLdrXT2anAACDRBrG8igqVC08ITVIg9XMAEAAwIAA3MAAz0E"),
+    "Leah Halton": ("B",175,88,"AgACAgQAAxkBAAEiiyhqpr1II4KnLYGLp4wwWO25ZUjnMwAC8w9rGxHWOFHnxgG03-TRhAEAAwIAA3MAAz0E"),
+    "Ashlyn Castro": ("B",175,88,"AgACAgQAAxkBAAEiiypqpr2gKFikU1gkAAFPisEKVaAKA5oAAvQPaxsR1jhRLB-aZnzbFkIBAAMCAANtAAM9BA"),
+    "Kristen Stewart": ("B",175,88,"AgACAgQAAxkBAAEiLHxqlZSorrGyLnSOBdRqRqdnSvnaXgACDxBrG8igqVDQHpTLZKuoOwEAAwIAA3MAAz0E"),
     "Olivia Cooke": ("A",350,262,"AgACAgQAAxkBAAEiLFBqlZC2pdCvovgiG6aqLJwG7oNBHAAC_w9rG8igqVC9yhxFuB9gDQEAAwIAA3MAAz0E"),
     "Sabrina Carpenter": ("B",350,175,"AgACAgQAAxkBAAEiLGxqlZJxN_AeZTfMK1e_iZUiC4tvaAACBxBrG8igqVD1mfDtce21cAEAAwIAA3MAAz0E"),
     "Dua Lipa": ("A",350,262,"AgACAgQAAxkBAAEiLIRqlZW2x2U46kRw5iGd8GMcDrH5xAACFxBrG8igqVBqy7bfQ8pbLgEAAwIAA3MAAz0E"),
