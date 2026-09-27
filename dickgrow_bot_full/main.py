@@ -196,7 +196,7 @@ HELP_SECTIONS = {
         "⏳ در حال رشد → بزن روش تا ببینی چقدر مونده\n"
         "✅ آماده‌ی برداشت → بزن روش تا اسپرم بگیری\n"
         "💀 فاسدشده → اگه دیر بجنبی نصف ارزشش رو می‌گیری\n\n"
-        "از همون پنل می‌تونی زمین جدید باز کنی، یه تخم تکی شانسی بخری (۵ سانت)، یا یه پک ۳تایی بخری (۳۰ سانت). رنگ‌های ارزون (⚪🟢) شانس دارن موقع برداشت یه تخم دیگه از خودشون بندازن؛ رنگ‌های کمیاب (🔵🟣🟡) هیچ‌وقت تکرار نمی‌شن ولی سودشون خیلی بیشتره.\n\n"
+        "از همون پنل می‌تونی زمین جدید باز کنی، یه تخم تکی شانسی بخری (۷ سانت)، یا یه پک ۳تایی بخری (۳۰ سانت). رنگ‌های ارزون (⚪🟢) شانس دارن موقع برداشت یه تخم دیگه از خودشون بندازن؛ بقیه (🔷🔵🟪🟣🟡) هیچ‌وقت تکرار نمی‌شن ولی سودشون بیشتره — هرچی کمیاب‌تر، دیرتر می‌رسه ولی سودش نامتناسب بیشتره.\n\n"
         "🌾 /farmrank — رنک مزرعه‌ی خودت، بر اساس دقیقاً چیزی که الان تو زمین‌ها و انبارته\n"
         "📊 /farmleader — جدول رنک مزرعه‌ی کل گروه"
     ),
@@ -303,16 +303,18 @@ async def to_cent(m:Message):
 
 # ===== مزرعه‌ی اسپرم =====
 EGGS = {
-    "white":  {"emoji": "⚪", "name": "تخم شل",         "chance": 50, "time": 30*60,    "min": 5,   "max": 10,  "replicate": 30},
-    "green":  {"emoji": "🟢", "name": "تخم آبدار",      "chance": 25, "time": 2*3600,   "min": 20,  "max": 35,  "replicate": 15},
-    "blue":   {"emoji": "🔵", "name": "تخم پرقدرت",     "chance": 15, "time": 6*3600,   "min": 60,  "max": 100, "replicate": 0},
-    "purple": {"emoji": "🟣", "name": "تخم رعدآسا",     "chance": 8,  "time": 12*3600,  "min": 150, "max": 250, "replicate": 0},
-    "gold":   {"emoji": "🟡", "name": "تخم ایلان ماسک", "chance": 2,  "time": 24*3600,  "min": 500, "max": 800, "replicate": 0},
+    "white":  {"emoji": "⚪", "name": "تخم شل",         "chance": 45, "time": 30*60,   "min": 5,   "max": 10,  "replicate": 30},
+    "green":  {"emoji": "🟢", "name": "تخم آبدار",      "chance": 20, "time": 2*3600,  "min": 20,  "max": 35,  "replicate": 15},
+    "cyan":   {"emoji": "🔷", "name": "تخم فیروزه‌ای",   "chance": 15, "time": 4*3600,  "min": 40,  "max": 60,  "replicate": 0},
+    "blue":   {"emoji": "🔵", "name": "تخم پرقدرت",     "chance": 10, "time": 6*3600,  "min": 60,  "max": 100, "replicate": 0},
+    "indigo": {"emoji": "🟪", "name": "تخم سرمه‌ای",     "chance": 6,  "time": 9*3600,  "min": 100, "max": 150, "replicate": 0},
+    "purple": {"emoji": "🟣", "name": "تخم رعدآسا",     "chance": 3,  "time": 12*3600, "min": 150, "max": 250, "replicate": 0},
+    "gold":   {"emoji": "🟡", "name": "تخم ایلان ماسک", "chance": 1,  "time": 24*3600, "min": 500, "max": 800, "replicate": 0},
 }
 EGG_SURPRISE_CHANCE = 0.02   # شانس اینکه یه تخم ارزون در واقع طلایی مخفی دربیاد
 FARM_SPOIL_MULTIPLIER = 2    # بعد این‌قدر برابر زمان اصلی، تخم فاسد میشه و نصف ارزش میده
 FARM_PAGE_SIZE = 9           # هر صفحه از پنل چندتا خونه نشون بده (۳ در ۳)
-EGG_SINGLE_COST = 5          # هزینه‌ی یه تخم تکی شانسی
+EGG_SINGLE_COST = 7          # هزینه‌ی یه تخم تکی شانسی
 EGG_PACK_COST = 30           # هزینه‌ی هر پک (۳ تخم شانسی)
 EGG_PACK_SIZE = 3
 PLOT_BASE_COST = 20          # هزینه‌ی باز کردن اولین زمین‌های اضافه؛ هرچی بیشتر داشته باشی گرون‌تر میشه
@@ -1185,45 +1187,45 @@ db.commit()
 
 
 CELEBS = {
-    "realtrelilove": ("PH",360,300,"AgACAgQAAxkBAAEiyFBqsl-5jTz16APdmObyCkIx7YxhswAClQ5rG7ngkFFdW6GmZb8jHQEAAwIAA3MAAz0E"),
-    "Reislin": ("PH",360,300,"AgACAgQAAxkBAAEiyFJqsmCJV0lfG4fGyV1NAzacB8Cw-QACmA5rG7ngkFF8Fc3TvW79agEAAwIAA3MAAz0E"),
-    "Jenny Kitty": ("PH",360,300,"AgACAgQAAxkBAAEii1tqpsVgDm25Nn44iH4e6bjwlTu2DQACAhBrGxHWOFF506Hdb2bopwEAAwIAA3MAAz0E"),
-    "Eva Elfie": ("PH",360,300,"AgACAgQAAxkBAAEii1FqpsQmac1sr7zDK5Xt_G_FbeOM7AACARBrGxHWOFFJWAjEYvCMBwEAAwIAA3MAAz0E"),
-    "Eden Ivy": ("PH",360,300,"AgACAgQAAxkBAAEixFxqsbxspcJ6O37kDI4Ha-S_3gGe6AACEBFrG9E-QVHRkUKIZY82rQEAAwIAA3MAAz0E"),
-    "Ana Stangle": ("PH",360,300,"AgACAgQAAxkBAAEiixhqprxb_z1tsYNO_q36AAFG7bhvcrcAAu8PaxsR1jhR-H1AmjEhOykBAAMCAANtAAM9BA"),
-    "Ana Stangle": ("PH",360,300,"AgACAgQAAxkBAAEiixhqprxb_z1tsYNO_q36AAFG7bhvcrcAAu8PaxsR1jhR-H1AmjEhOykBAAMCAANtAAM9BA"),
-    "Polly Yangs": ("PH",360,300,"AgACAgQAAxkBAAEiixZqprwWMSc06gjR6Wf1AfjEMS-bYgAC7g9rGxHWOFF1rqHV_XmcqQEAAwIAA3MAAz0E"),
-    "Mia Malkova": ("PH",360,300,"AgACAgQAAxkBAAEiixJqprvaxcqdkRMMLmDFpVVVJ22ycwAC7Q9rGxHWOFHDv3vxo0jSfAEAAwIAA3MAAz0E"),
-    "Lyli Philips": ("PH",360,300,"AgACAgQAAxkBAAEiiwpqpruE7F2IrBlMo2Z7kJ7-iGC3hgAC6g9rGxHWOFEDhS0dv-NIdQEAAwIAA3MAAz0E"),
-    "Remida": ("PH",360,300,"AgACAgQAAxkBAAEiiwZqprtRYUg6S4AaVWga3nd9oplYegAC6Q9rGxHWOFELW3Aa_kVp9QEAAwIAA3MAAz0E"),
-    "Lily Lou": ("PH",360,300,"AgACAgQAAxkBAAEiiv5qprr3COm1SOlfeWjvRoU-Dmz9AgAC6A9rGxHWOFFkcd5sl-uEqwEAAwIAA3MAAz0E"),
-    "Lena Paul": ("PH",360,300,"AgACAgQAAxkBAAEiivZqprk0NUKUAwABNROBmv06cviy35UAAvgVaxs3EDhR-L2oRxHNDegBAAMCAANzAAM9BA"),
-    "Angela White": ("PH",360,300,"AgACAgQAAxkBAAEiK8tqlX0p5xvvc7RkL8yCDK50C70cMAAC3hBrG4IDsFBEhOBKjPVnEgEAAwIAA3MAAz0E"),
-    "Comatozze": ("PH",360,300,"AgACAgQAAxkBAAEiK99qlYOdZfkvzeW8xB9yg8ay0a5E0AAC4w9rG8igqVDkAAH7iUzCMUoBAAMCAANzAAM9BA"),
-    "Sweetie Fox": ("PH",360,300,"AgACAgQAAxkBAAEiK-NqlYTmIgPdooRd2A-cfBNbZIDWDwAC5g9rG8igqVDv7lHTLO7LEgEAAwIAA3MAAz0E"),
-    "Diana Rider": ("PH",360,300,"AgACAgQAAxkBAAEiiyZqpr0Z6wHI0orDFTTA0FpqPDKxcgAC8g9rGxHWOFEEh3EQeHYcWwEAAwIAA3MAAz0E"),
-    "Lana Rhoades": ("PH",360,300,"AgACAgQAAxkBAAEiK-dqlYZjT3rDHHtNt5EPHZTb_o70xwAC6A9rG8igqVCMQM6VNiWu-wEAAwIAA3MAAz0E"),
-    "Ana de Armas": ("S",310,250,"AgACAgQAAxkBAAEiLBRqlYks3xjU5rQCkNXypUQOoS9n3QAC7w9rG8igqVAhpyUv1rvdmwEAAwIAA3MAAz0E"),
-    "Kylie Jenner": ("S",310,250,"AgACAgQAAxkBAAEii0NqpsFgJgN8lSjVTyiKBQanxRUV7AAC_Q9rGxHWOFHpMFeQR7I8fQEAAwIAA3MAAz0E"),
-    "Sydney Sweeney": ("S",310,250,"AgACAgQAAxkBAAEii0tqpsL7OwOzbu-UicheoiKjfQGvEgAC_w9rGxHWOFEfc0vRD4_BvAEAAwIAA3MAAz0E"),
-    "Pinkchyu": ("S",310,250,"AgACAgQAAxkBAAEiiz9qpsDeoCCTvNfIyfhp_0DLu6md9gAC-g9rGxHWOFEwehVusIFDyAEAAwIAA3MAAz0E"),
-    "Georgina Rodriguez": ("S",310,250,"AgACAgQAAxkBAAEii0FqpsEls89dT1QptHWD0jEdIhaOXQAC_A9rGxHWOFGfJx1nk0t_GAEAAwIAA3MAAz0E"),
-    "Madison Beer": ("A",200,150,"AgACAgQAAxkBAAEiix5qpry4N-XRCC1BeUeGrBacwO1PxwAC8Q9rGxHWOFEiXTj03FeFEAEAAwIAA3MAAz0E"),
-    "Sadie Sink": ("A",200,150,"AgACAgQAAxkBAAEiLFJqlZEGt1mG9G15PgKP4PPhQcRm-gACARBrG8igqVCvW3ZnrKAGywEAAwIAA3MAAz0E"),
-    "Scarlett Johansson": ("A",200,150,"AgACAgQAAxkBAAEijSBqpwXof-3vjZeK_61sIm9brMrWWwAC5Q9rG_HjOVGRBdU_77rF8wEAAwIAA3MAAz0E"),
-    "Anne Hathaway": ("B",300,150,"AgACAgQAAxkBAAEiLHJqlZLNXRVWSN-k7xu-doS7FTDsbgACCRBrG8igqVDk8fgU3uXUFwEAAwIAA3MAAz0E"),
-    "Elizabeth Olsen": ("B",300,150,"AgACAgQAAxkBAAEiLHRqlZNem1Ue0rp7IJ182xumcv2XKwACChBrG8igqVDyu9zwySffJAEAAwIAA3MAAz0E"),
-    "Olivia Rodrigo": ("B",300,150,"AgACAgQAAxkBAAEiLHZqlZPReBV1oF2fHUcz1MiKfWTuPAACCxBrG8igqVDsVdcPA4GFUAEAAwIAA3MAAz0E"),
-    "Emma Watson": ("B",300,150,"AgACAgQAAxkBAAEiLHpqlZRQeIXIaNZcdp3gXLdrXT2anAACDRBrG8igqVC08ITVIg9XMAEAAwIAA3MAAz0E"),
-    "Leah Halton": ("B",300,150,"AgACAgQAAxkBAAEiiyhqpr1II4KnLYGLp4wwWO25ZUjnMwAC8w9rGxHWOFHnxgG03-TRhAEAAwIAA3MAAz0E"),
-    "Ashlyn Castro": ("B",300,150,"AgACAgQAAxkBAAEiiypqpr2gKFikU1gkAAFPisEKVaAKA5oAAvQPaxsR1jhRLB-aZnzbFkIBAAMCAANtAAM9BA"),
-    "Kristen Stewart": ("B",300,150,"AgACAgQAAxkBAAEiLHxqlZSorrGyLnSOBdRqRqdnSvnaXgACDxBrG8igqVDQHpTLZKuoOwEAAwIAA3MAAz0E"),
-    "Olivia Cooke": ("A",200,150,"AgACAgQAAxkBAAEiLFBqlZC2pdCvovgiG6aqLJwG7oNBHAAC_w9rG8igqVC9yhxFuB9gDQEAAwIAA3MAAz0E"),
-    "Sabrina Carpenter": ("B",200,100,"AgACAgQAAxkBAAEiLGxqlZJxN_AeZTfMK1e_iZUiC4tvaAACBxBrG8igqVD1mfDtce21cAEAAwIAA3MAAz0E"),
-    "Dua Lipa": ("A",200,150,"AgACAgQAAxkBAAEiLIRqlZW2x2U46kRw5iGd8GMcDrH5xAACFxBrG8igqVBqy7bfQ8pbLgEAAwIAA3MAAz0E"),
-    "Sophie Tatcher": ("A",200,150,"AgACAgQAAxkBAAEiLExqlZBP5UH5p9rTTAUQ6hv3_mUpkAAC_g9rG8igqVABEzpZosgbbAEAAwIAA3MAAz0E"),
-    "Billie Eilish": ("S",310,250,"AgACAgQAAxkBAAEii01qpsO9jfgwqGNaCOuxcDI2B_tolAACLRFrG-cKCVH7fF__m9zGrQEAAwIAA3MAAz0E"),
-    "Folorance Pugh": ("B",100,50,"AgACAgQAAxkBAAEiizBqpr485700NYU6jwetz6qFBbBYrgAC9g9rGxHWOFFkMl6wX7RergEAAwIAA3MAAz0E"),
+    "realtrelilove": ("PH",630,525,"AgACAgQAAxkBAAEiyFBqsl-5jTz16APdmObyCkIx7YxhswAClQ5rG7ngkFFdW6GmZb8jHQEAAwIAA3MAAz0E"),
+    "Reislin": ("PH",630,525,"AgACAgQAAxkBAAEiyFJqsmCJV0lfG4fGyV1NAzacB8Cw-QACmA5rG7ngkFF8Fc3TvW79agEAAwIAA3MAAz0E"),
+    "Jenny Kitty": ("PH",630,525,"AgACAgQAAxkBAAEii1tqpsVgDm25Nn44iH4e6bjwlTu2DQACAhBrGxHWOFF506Hdb2bopwEAAwIAA3MAAz0E"),
+    "Eva Elfie": ("PH",630,525,"AgACAgQAAxkBAAEii1FqpsQmac1sr7zDK5Xt_G_FbeOM7AACARBrGxHWOFFJWAjEYvCMBwEAAwIAA3MAAz0E"),
+    "Eden Ivy": ("PH",630,525,"AgACAgQAAxkBAAEixFxqsbxspcJ6O37kDI4Ha-S_3gGe6AACEBFrG9E-QVHRkUKIZY82rQEAAwIAA3MAAz0E"),
+    "Ana Stangle": ("PH",630,525,"AgACAgQAAxkBAAEiixhqprxb_z1tsYNO_q36AAFG7bhvcrcAAu8PaxsR1jhR-H1AmjEhOykBAAMCAANtAAM9BA"),
+    "Ana Stangle": ("PH",630,525,"AgACAgQAAxkBAAEiixhqprxb_z1tsYNO_q36AAFG7bhvcrcAAu8PaxsR1jhR-H1AmjEhOykBAAMCAANtAAM9BA"),
+    "Polly Yangs": ("PH",630,525,"AgACAgQAAxkBAAEiixZqprwWMSc06gjR6Wf1AfjEMS-bYgAC7g9rGxHWOFF1rqHV_XmcqQEAAwIAA3MAAz0E"),
+    "Mia Malkova": ("PH",630,525,"AgACAgQAAxkBAAEiixJqprvaxcqdkRMMLmDFpVVVJ22ycwAC7Q9rGxHWOFHDv3vxo0jSfAEAAwIAA3MAAz0E"),
+    "Lyli Philips": ("PH",630,525,"AgACAgQAAxkBAAEiiwpqpruE7F2IrBlMo2Z7kJ7-iGC3hgAC6g9rGxHWOFEDhS0dv-NIdQEAAwIAA3MAAz0E"),
+    "Remida": ("PH",630,525,"AgACAgQAAxkBAAEiiwZqprtRYUg6S4AaVWga3nd9oplYegAC6Q9rGxHWOFELW3Aa_kVp9QEAAwIAA3MAAz0E"),
+    "Lily Lou": ("PH",630,525,"AgACAgQAAxkBAAEiiv5qprr3COm1SOlfeWjvRoU-Dmz9AgAC6A9rGxHWOFFkcd5sl-uEqwEAAwIAA3MAAz0E"),
+    "Lena Paul": ("PH",630,525,"AgACAgQAAxkBAAEiivZqprk0NUKUAwABNROBmv06cviy35UAAvgVaxs3EDhR-L2oRxHNDegBAAMCAANzAAM9BA"),
+    "Angela White": ("PH",630,525,"AgACAgQAAxkBAAEiK8tqlX0p5xvvc7RkL8yCDK50C70cMAAC3hBrG4IDsFBEhOBKjPVnEgEAAwIAA3MAAz0E"),
+    "Comatozze": ("PH",630,525,"AgACAgQAAxkBAAEiK99qlYOdZfkvzeW8xB9yg8ay0a5E0AAC4w9rG8igqVDkAAH7iUzCMUoBAAMCAANzAAM9BA"),
+    "Sweetie Fox": ("PH",630,525,"AgACAgQAAxkBAAEiK-NqlYTmIgPdooRd2A-cfBNbZIDWDwAC5g9rG8igqVDv7lHTLO7LEgEAAwIAA3MAAz0E"),
+    "Diana Rider": ("PH",630,525,"AgACAgQAAxkBAAEiiyZqpr0Z6wHI0orDFTTA0FpqPDKxcgAC8g9rGxHWOFEEh3EQeHYcWwEAAwIAA3MAAz0E"),
+    "Lana Rhoades": ("PH",630,525,"AgACAgQAAxkBAAEiK-dqlYZjT3rDHHtNt5EPHZTb_o70xwAC6A9rG8igqVCMQM6VNiWu-wEAAwIAA3MAAz0E"),
+    "Ana de Armas": ("S",542,438,"AgACAgQAAxkBAAEiLBRqlYks3xjU5rQCkNXypUQOoS9n3QAC7w9rG8igqVAhpyUv1rvdmwEAAwIAA3MAAz0E"),
+    "Kylie Jenner": ("S",542,438,"AgACAgQAAxkBAAEii0NqpsFgJgN8lSjVTyiKBQanxRUV7AAC_Q9rGxHWOFHpMFeQR7I8fQEAAwIAA3MAAz0E"),
+    "Sydney Sweeney": ("S",542,438,"AgACAgQAAxkBAAEii0tqpsL7OwOzbu-UicheoiKjfQGvEgAC_w9rGxHWOFEfc0vRD4_BvAEAAwIAA3MAAz0E"),
+    "Pinkchyu": ("S",542,438,"AgACAgQAAxkBAAEiiz9qpsDeoCCTvNfIyfhp_0DLu6md9gAC-g9rGxHWOFEwehVusIFDyAEAAwIAA3MAAz0E"),
+    "Georgina Rodriguez": ("S",542,438,"AgACAgQAAxkBAAEii0FqpsEls89dT1QptHWD0jEdIhaOXQAC_A9rGxHWOFGfJx1nk0t_GAEAAwIAA3MAAz0E"),
+    "Madison Beer": ("A",350,262,"AgACAgQAAxkBAAEiix5qpry4N-XRCC1BeUeGrBacwO1PxwAC8Q9rGxHWOFEiXTj03FeFEAEAAwIAA3MAAz0E"),
+    "Sadie Sink": ("A",350,262,"AgACAgQAAxkBAAEiLFJqlZEGt1mG9G15PgKP4PPhQcRm-gACARBrG8igqVCvW3ZnrKAGywEAAwIAA3MAAz0E"),
+    "Scarlett Johansson": ("A",350,262,"AgACAgQAAxkBAAEijSBqpwXof-3vjZeK_61sIm9brMrWWwAC5Q9rG_HjOVGRBdU_77rF8wEAAwIAA3MAAz0E"),
+    "Anne Hathaway": ("B",525,262,"AgACAgQAAxkBAAEiLHJqlZLNXRVWSN-k7xu-doS7FTDsbgACCRBrG8igqVDk8fgU3uXUFwEAAwIAA3MAAz0E"),
+    "Elizabeth Olsen": ("B",525,262,"AgACAgQAAxkBAAEiLHRqlZNem1Ue0rp7IJ182xumcv2XKwACChBrG8igqVDyu9zwySffJAEAAwIAA3MAAz0E"),
+    "Olivia Rodrigo": ("B",525,262,"AgACAgQAAxkBAAEiLHZqlZPReBV1oF2fHUcz1MiKfWTuPAACCxBrG8igqVDsVdcPA4GFUAEAAwIAA3MAAz0E"),
+    "Emma Watson": ("B",525,262,"AgACAgQAAxkBAAEiLHpqlZRQeIXIaNZcdp3gXLdrXT2anAACDRBrG8igqVC08ITVIg9XMAEAAwIAA3MAAz0E"),
+    "Leah Halton": ("B",525,262,"AgACAgQAAxkBAAEiiyhqpr1II4KnLYGLp4wwWO25ZUjnMwAC8w9rGxHWOFHnxgG03-TRhAEAAwIAA3MAAz0E"),
+    "Ashlyn Castro": ("B",525,262,"AgACAgQAAxkBAAEiiypqpr2gKFikU1gkAAFPisEKVaAKA5oAAvQPaxsR1jhRLB-aZnzbFkIBAAMCAANtAAM9BA"),
+    "Kristen Stewart": ("B",525,262,"AgACAgQAAxkBAAEiLHxqlZSorrGyLnSOBdRqRqdnSvnaXgACDxBrG8igqVDQHpTLZKuoOwEAAwIAA3MAAz0E"),
+    "Olivia Cooke": ("A",350,262,"AgACAgQAAxkBAAEiLFBqlZC2pdCvovgiG6aqLJwG7oNBHAAC_w9rG8igqVC9yhxFuB9gDQEAAwIAA3MAAz0E"),
+    "Sabrina Carpenter": ("B",350,175,"AgACAgQAAxkBAAEiLGxqlZJxN_AeZTfMK1e_iZUiC4tvaAACBxBrG8igqVD1mfDtce21cAEAAwIAA3MAAz0E"),
+    "Dua Lipa": ("A",350,262,"AgACAgQAAxkBAAEiLIRqlZW2x2U46kRw5iGd8GMcDrH5xAACFxBrG8igqVBqy7bfQ8pbLgEAAwIAA3MAAz0E"),
+    "Sophie Tatcher": ("A",350,262,"AgACAgQAAxkBAAEiLExqlZBP5UH5p9rTTAUQ6hv3_mUpkAAC_g9rG8igqVABEzpZosgbbAEAAwIAA3MAAz0E"),
+    "Billie Eilish": ("S",542,438,"AgACAgQAAxkBAAEii01qpsO9jfgwqGNaCOuxcDI2B_tolAACLRFrG-cKCVH7fF__m9zGrQEAAwIAA3MAAz0E"),
+    "Folorance Pugh": ("B",175,88,"AgACAgQAAxkBAAEiizBqpr485700NYU6jwetz6qFBbBYrgAC9g9rGxHWOFFkMl6wX7RergEAAwIAA3MAAz0E"),
 }
 
 
@@ -1239,7 +1241,7 @@ TIER_LABELS = {
     "B": "🥉 Tier B",
     "PH": "💎 Tier PH",
 }
-TIER_PRICES = {"S": (310, 250), "A": (200, 150), "B": (100, 50), "PH": (360, 300)}
+TIER_PRICES = {"S": (543, 438), "A": (350, 262), "B": (175, 88), "PH": (630, 525)}
 
 def build_market_caption(tier, page):
     celebs = TIER_CELEBS[tier]
@@ -1515,7 +1517,7 @@ async def spin(m:Message):
     except:
         return await m.reply("استفاده: /spin s | a | b")
 
-    prices={"S":250,"A":150,"B":50,"PH":300}
+    prices={"S":438,"A":262,"B":88,"PH":525}
 
     if tier not in prices:
         return await m.reply("Tier باید s یا a یا b باشد.")
