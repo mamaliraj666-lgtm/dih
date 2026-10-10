@@ -158,6 +158,18 @@ def get_name(chat_id,uid):
 
 dp=Dispatcher()
 
+# ===== قفل دکمه‌های جابه‌جایی: هر پیام مال کسیه که دستور رو زده =====
+# callback_data همه‌ی دکمه‌های ◀️ ▶️ آیدی «بیننده» (کسی که دستور رو زده) رو داره؛
+# اگه کس دیگه‌ای بزنه فقط هشدار می‌گیره و پیام عوض نمی‌شه.
+NAV_LOCK_MSG = "🔒 این پیام مال کسیه که دستور رو زده — خودت دستورش رو بزن تا کالکشن مال خودت باشه."
+NAV_LEGACY_MSG = "⌛️ این پیام قدیمیه؛ دوباره دستورش رو بزن."
+
+async def nav_guard(q, viewer_id):
+    if q.from_user.id != viewer_id:
+        await q.answer(NAV_LOCK_MSG, show_alert=True)
+        return False
+    return True
+
 # ===== راهنمای بازی =====
 HELP_SECTIONS = {
     "econ": (
@@ -1299,13 +1311,13 @@ def build_market_caption(tier, page):
     )
     return txt, photo
 
-def build_market_kb(tier, page):
+def build_market_kb(tier, page, viewer_id):
     celebs = TIER_CELEBS[tier]
     buttons = []
     if page > 0:
-        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"mkt:{tier}:{page-1}"))
+        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"mkt:{viewer_id}:{tier}:{page-1}"))
     if page < len(celebs) - 1:
-        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"mkt:{tier}:{page+1}"))
+        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"mkt:{viewer_id}:{tier}:{page+1}"))
     return InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
 
 async def fetch_photo(url: str) -> BufferedInputFile | None:
@@ -1361,7 +1373,7 @@ async def market(m:Message):
         if not TIER_CELEBS[tier]:
             continue
         txt, photo_url = build_market_caption(tier, 0)
-        kb = build_market_kb(tier, 0)
+        kb = build_market_kb(tier, 0, m.from_user.id)
         photo = await resolve_photo(photo_url) if photo_url else None
         try:
             if photo:
@@ -1378,10 +1390,15 @@ async def market(m:Message):
 
 @dp.callback_query(F.data.startswith("mkt:"))
 async def market_page_nav(q: CallbackQuery):
-    _, tier, page = q.data.split(":")
-    page = int(page)
+    parts = q.data.split(":")
+    if len(parts) != 4:
+        return await q.answer(NAV_LEGACY_MSG, show_alert=True)
+    _, viewer_id, tier, page = parts
+    viewer_id, page = int(viewer_id), int(page)
+    if not await nav_guard(q, viewer_id):
+        return
     txt, photo_url = build_market_caption(tier, page)
-    kb = build_market_kb(tier, page)
+    kb = build_market_kb(tier, page, viewer_id)
     photo = await resolve_photo(photo_url) if photo_url else None
     try:
         if photo and q.message.photo:
@@ -1432,9 +1449,9 @@ async def send_collection_page(chat_id, owner_id, celebs, page, bot, viewer_id=N
     )
     buttons = []
     if page > 0:
-        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"col:{owner_id}:{page-1}"))
+        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"col:{viewer_id}:{owner_id}:{page-1}"))
     if page < len(celebs) - 1:
-        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"col:{owner_id}:{page+1}"))
+        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"col:{viewer_id}:{owner_id}:{page+1}"))
     kb = InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
     photo = await resolve_photo(photo_url) if photo_url else None
     try:
@@ -1450,11 +1467,14 @@ async def send_collection_page(chat_id, owner_id, celebs, page, bot, viewer_id=N
 
 @dp.callback_query(F.data.startswith("col:"))
 async def collection_nav(q: CallbackQuery):
-    _, owner_id, page = q.data.split(":")
-    owner_id = int(owner_id)
-    page = int(page)
+    parts = q.data.split(":")
+    if len(parts) != 4:
+        return await q.answer(NAV_LEGACY_MSG, show_alert=True)
+    _, viewer_id, owner_id, page = parts
+    viewer_id, owner_id, page = int(viewer_id), int(owner_id), int(page)
+    if not await nav_guard(q, viewer_id):
+        return
     chat_id = q.message.chat.id
-    # allow anyone to browse
     rows = c.execute("SELECT celeb FROM collections WHERE chat_id=? AND user_id=?", (chat_id, owner_id)).fetchall()
     celebs = [r[0] for r in rows]
     if page >= len(celebs):
@@ -1472,9 +1492,9 @@ async def collection_nav(q: CallbackQuery):
     )
     buttons = []
     if page > 0:
-        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"col:{owner_id}:{page-1}"))
+        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"col:{viewer_id}:{owner_id}:{page-1}"))
     if page < len(celebs) - 1:
-        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"col:{owner_id}:{page+1}"))
+        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"col:{viewer_id}:{owner_id}:{page+1}"))
     kb = InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
     photo = await resolve_photo(photo_url) if photo_url else None
     try:
@@ -2045,7 +2065,7 @@ def get_top_bid_auctions(chat_id, uid):
         (chat_id, uid)
     ).fetchall()
 
-def build_bidcol_page(chat_id, owner_id, page):
+def build_bidcol_page(chat_id, owner_id, page, viewer_id):
     """خروجی: (متن، file_id عکس، کیبورد) یا (None, None, None) اگه چیزی نباشه."""
     rows = get_top_bid_auctions(chat_id, owner_id)
     if not rows:
@@ -2072,12 +2092,13 @@ def build_bidcol_page(chat_id, owner_id, page):
     )
     buttons = []
     if page > 0:
-        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"bcol:{owner_id}:{page-1}"))
+        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"bcol:{viewer_id}:{owner_id}:{page-1}"))
     if page < len(rows) - 1:
-        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"bcol:{owner_id}:{page+1}"))
+        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"bcol:{viewer_id}:{owner_id}:{page+1}"))
     rows_kb = [buttons] if buttons else []
-    rows_kb.append([InlineKeyboardButton(text="❌ لغو این پیشنهاد", callback_data=f"cbid:{owner_id}:{aid}")])
-    kb = InlineKeyboardMarkup(inline_keyboard=rows_kb)
+    if viewer_id == owner_id:  # دکمه‌ی لغو فقط تو کالکشن خود صاحب پیشنهاد
+        rows_kb.append([InlineKeyboardButton(text="❌ لغو این پیشنهاد", callback_data=f"cbid:{owner_id}:{aid}")])
+    kb = InlineKeyboardMarkup(inline_keyboard=rows_kb) if rows_kb else None
     return txt, photo, kb
 
 @dp.message(Command("bidcol"))
@@ -2089,7 +2110,7 @@ async def bid_collection(m: Message):
     else:
         user(m.chat.id, m.from_user.id, m.from_user.full_name)
         owner_id, owner_name = m.from_user.id, m.from_user.full_name
-    txt, photo_ref, kb = build_bidcol_page(m.chat.id, owner_id, 0)
+    txt, photo_ref, kb = build_bidcol_page(m.chat.id, owner_id, 0, m.from_user.id)
     if not txt:
         return await m.reply(
             f"🔨 {owner_name} الان بالاترین پیشنهاد هیچ مزایده‌ای رو نداره.\n"
@@ -2110,9 +2131,14 @@ async def bid_collection(m: Message):
 
 @dp.callback_query(F.data.startswith("bcol:"))
 async def bid_collection_nav(q: CallbackQuery):
-    _, owner_id, page = q.data.split(":")
-    owner_id, page = int(owner_id), int(page)
-    txt, photo_ref, kb = build_bidcol_page(q.message.chat.id, owner_id, page)
+    parts = q.data.split(":")
+    if len(parts) != 4:
+        return await q.answer(NAV_LEGACY_MSG, show_alert=True)
+    _, viewer_id, owner_id, page = parts
+    viewer_id, owner_id, page = int(viewer_id), int(owner_id), int(page)
+    if not await nav_guard(q, viewer_id):
+        return
+    txt, photo_ref, kb = build_bidcol_page(q.message.chat.id, owner_id, page, viewer_id)
     if not txt:
         try:
             await q.message.edit_caption(caption="🔨 دیگه پیشنهاد برتری برای این کاربر نمونده (مزایده‌ها تموم شدن یا کسی بالاتر داده).")
@@ -2210,7 +2236,7 @@ async def cancel_bid_btn(q: CallbackQuery):
         return await q.answer(msg, show_alert=True)
     await q.answer("✅ پیشنهاد لغو شد و سانتت برگشت.", show_alert=True)
     await q.message.reply(msg)
-    txt, photo_ref, kb = build_bidcol_page(q.message.chat.id, owner_id, 0)
+    txt, photo_ref, kb = build_bidcol_page(q.message.chat.id, owner_id, 0, owner_id)
     try:
         if not txt:
             txt = f"🔨 دیگه بالاترین پیشنهاد هیچ مزایده‌ای مال تو نیست.\n📏 سانت آزاد: {get_size(q.message.chat.id, owner_id)}"
@@ -2230,7 +2256,7 @@ async def cancel_bid_btn(q: CallbackQuery):
         logger.warning("cancel_bid_btn refresh failed: %s", e)
 
 # ===== کالکشن مزایده‌های فعال (همه‌ی مزایده‌های در جریان، با عکس) =====
-def build_aucol_page(chat_id, page):
+def build_aucol_page(chat_id, page, viewer_id):
     """خروجی: (متن، file_id عکس، کیبورد) یا (None, None, None) اگه مزایده‌ی فعالی نباشه."""
     rows = get_active_auctions(chat_id)
     if not rows:
@@ -2255,15 +2281,15 @@ def build_aucol_page(chat_id, page):
     )
     buttons = []
     if page > 0:
-        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"acol:{page-1}"))
+        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"acol:{viewer_id}:{page-1}"))
     if page < len(rows) - 1:
-        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"acol:{page+1}"))
+        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"acol:{viewer_id}:{page+1}"))
     kb = InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
     return txt, photo, kb
 
 @dp.message(Command("aucol"))
 async def auction_collection(m: Message):
-    txt, photo_ref, kb = build_aucol_page(m.chat.id, 0)
+    txt, photo_ref, kb = build_aucol_page(m.chat.id, 0, m.from_user.id)
     if not txt:
         return await m.reply("📭 الان هیچ مزایده‌ای در جریان نیست.")
     photo = await resolve_photo(photo_ref) if photo_ref else None
@@ -2280,8 +2306,13 @@ async def auction_collection(m: Message):
 
 @dp.callback_query(F.data.startswith("acol:"))
 async def auction_collection_nav(q: CallbackQuery):
-    page = int(q.data.split(":")[1])
-    txt, photo_ref, kb = build_aucol_page(q.message.chat.id, page)
+    parts = q.data.split(":")
+    if len(parts) != 3:
+        return await q.answer(NAV_LEGACY_MSG, show_alert=True)
+    viewer_id, page = int(parts[1]), int(parts[2])
+    if not await nav_guard(q, viewer_id):
+        return
+    txt, photo_ref, kb = build_aucol_page(q.message.chat.id, page, viewer_id)
     if not txt:
         try:
             if q.message.photo:
