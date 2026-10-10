@@ -85,6 +85,12 @@ try:
 except sqlite3.OperationalError:
     pass
 
+try:
+    c.execute("ALTER TABLE users ADD COLUMN tokens INTEGER DEFAULT 0")
+    db.commit()
+except sqlite3.OperationalError:
+    pass
+
 c.execute("""CREATE TABLE IF NOT EXISTS farm_tiles(
     chat_id INTEGER,
     user_id INTEGER,
@@ -156,6 +162,43 @@ def get_name(chat_id,uid):
     row=c.execute("SELECT name FROM users WHERE chat_id=? AND user_id=?",(chat_id,uid)).fetchone()
     return row[0] if row else "کاربر"
 
+# ===== توکن بازی 🎟 =====
+# - هر دست مینی‌گیم (/box ، /climb ، /bj) ۱ توکن ورودی می‌خواد (جدا از شرط)
+# - قیمت هر توکن = ۵٪ سایز لحظه‌ی خرید (حداقل ۱ سانت)؛ تو یه خرید قیمت ثابته
+# - برنده‌ی دوئل (/pvp) با شانس بالا یه توکن هم می‌گیره
+TOKEN_PRICE_PCT = 0.05
+TOKEN_MAX_BUY = 20
+DUEL_TOKEN_CHANCE = 0.7
+
+def get_tokens(chat_id, uid):
+    row = c.execute("SELECT tokens FROM users WHERE chat_id=? AND user_id=?", (chat_id, uid)).fetchone()
+    return (row[0] or 0) if row else 0
+
+def token_price(size_cm):
+    return max(1, int(size_cm * TOKEN_PRICE_PCT))
+
+def add_tokens(chat_id, uid, n=1):
+    c.execute("UPDATE users SET tokens=COALESCE(tokens,0)+? WHERE chat_id=? AND user_id=?", (n, chat_id, uid))
+    db.commit()
+
+def take_token(chat_id, uid):
+    """یه توکن مصرف می‌کنه؛ اگه نداشت False برمی‌گردونه."""
+    cur = c.execute(
+        "UPDATE users SET tokens=tokens-1 WHERE chat_id=? AND user_id=? AND COALESCE(tokens,0)>=1",
+        (chat_id, uid)
+    )
+    db.commit()
+    return cur.rowcount > 0
+
+def no_token_text(chat_id, uid):
+    price = token_price(get_size(chat_id, uid))
+    return (
+        "🎟 برای این بازی توکن لازمه!\n"
+        f"💰 الان هر توکن {price} سانته ({int(TOKEN_PRICE_PCT*100)}٪ سایزت)\n"
+        "🛒 /buytoken [تعداد] — خرید توکن\n"
+        "⚔️ برنده‌ی دوئل‌ها هم با شانس بالا توکن می‌گیره!"
+    )
+
 dp=Dispatcher()
 
 # ===== قفل دکمه‌های جابه‌جایی: هر پیام مال کسیه که دستور رو زده =====
@@ -180,12 +223,18 @@ HELP_SECTIONS = {
         "💳 /loan — گرفتن وام (با بهره)\n"
         "💵 /repay [مقدار] — پرداخت وام\n"
         "🧬 /tosperm [مقدار سانت] — تبدیل سانت به اسپرم (نرخ ۱ به ۲)\n"
-        "💰 /tocent [مقدار اسپرم] — تبدیل اسپرم به سانت\n\n"
-        "🎮 بازی‌های سریع (جعبه، نردبان، بلک‌جک) تو بخش «مینی‌گیم‌ها» هستن."
+        "💰 /tocent [مقدار اسپرم] — تبدیل اسپرم به سانت\n"
+        "🎟 /token — دیدن توکن‌ها و قیمت فعلی هر توکن\n"
+        f"🛒 /buytoken [تعداد] — خرید توکن بازی (هر توکن = {int(TOKEN_PRICE_PCT*100)}٪ سایزت)\n\n"
+        "🎮 بازی‌های سریع (جعبه، نردبان، بلک‌جک) تو بخش «مینی‌گیم‌ها» هستن و برای هر دست توکن می‌خوان."
     ),
     "games": (
         "🎮 مینی‌گیم‌ها",
         "همه‌ی این بازی‌ها با سانت کار می‌کنن، فقط تو گروه اجرا می‌شن و دکمه‌هاشون فقط برای کسیه که دستور رو زده.\n\n"
+        "🎟 رایگان نیستن! هر دست ۱ توکن ورودی می‌خواد (جدا از شرط):\n"
+        f"• خرید: /buytoken [تعداد] — هر توکن {int(TOKEN_PRICE_PCT*100)}٪ سایزت (حداقل ۱ سانت)\n"
+        f"• دوئل: برنده‌ی /pvp با {int(DUEL_TOKEN_CHANCE*100)}٪ شانس یه توکن هم می‌گیره\n"
+        "• موجودی: /token یا /size\n\n"
         "🎁 /box [مبلغ] — جعبه‌ی شانس\n"
         "۴ جعبه‌ی بسته میاد و یکی رو انتخاب می‌کنی: 💎 ×۳ | 🔄 شرطت برمی‌گرده | 💣💣 می‌سوزه. جای جعبه‌ها هر دور رندومه و آخرش همه‌شون باز می‌شن.\n"
         "(حداکثر شرط ۱۰۰ سانت)\n\n"
@@ -204,7 +253,7 @@ HELP_SECTIONS = {
         "دستت رو به ۲۱ نزدیک‌تر از دیلر کن، بدون اینکه از ۲۱ رد بشی. رد شدن از ۲۱ یعنی سوختن (Bust) و باخت فوری.\n\n"
         "▶️ شروع بازی\n"
         "/bj [مبلغ] — مثلاً /bj 20 (بین ۱ تا ۱۰۰ سانت؛ /blackjack هم کار می‌کنه)\n"
-        "شرطت همون اول کم می‌شه. دو کارت رو می‌گیری، دیلر هم دو کارت داره ولی فقط یکیش رو می‌بینی و اون یکی 🂠 مخفیه.\n\n"
+        "هر دست ۱ توکن ورودی می‌خواد (با /buytoken می‌خری). شرطت همون اول کم می‌شه. دو کارت رو می‌گیری، دیلر هم دو کارت داره ولی فقط یکیش رو می‌بینی و اون یکی 🂠 مخفیه.\n\n"
         "🔢 ارزش کارت‌ها\n"
         "• ۲ تا ۱۰ → همون عدد\n"
         "• J ، Q ، K → ۱۰ تا\n"
@@ -235,7 +284,8 @@ HELP_SECTIONS = {
         "⚔️ /pvp [مبلغ شرط] — چالش دادن به یه نفر برای دوئل ۱ به ۱\n"
         "🏅 /rank — دیدن رنک، امتیاز (RP) و پیشرفت روزانه‌ت\n"
         "🏆 /ranktop — لیدربرد رنک گروه\n"
-        "\nنکته: شانس بردت تو دوئل ثابت نیست — اگه زیادی برده باشی شانست کم می‌شه، اگه زیادی باخته باشی شانست زیاد می‌شه تا عادلانه بمونه."
+        "\nنکته: شانس بردت تو دوئل ثابت نیست — اگه زیادی برده باشی شانست کم می‌شه، اگه زیادی باخته باشی شانست زیاد می‌شه تا عادلانه بمونه.\n\n"
+        f"🎟 برنده‌ی دوئل علاوه بر جایزه با {int(DUEL_TOKEN_CHANCE*100)}٪ شانس یه توکن بازی هم می‌گیره (/token)."
     ),
     "mafia": (
         "🔫 مافیا",
@@ -353,7 +403,7 @@ async def size(m:Message):
     user(m.chat.id,m.from_user.id,m.from_user.full_name)
     s,sp,d=c.execute("SELECT size,sperm,debt FROM users WHERE chat_id=? AND user_id=?",(m.chat.id,m.from_user.id)).fetchone()
     await m.reply(
-        f"📊 پروفایل شما\n\n🍆 اندازه: {s} سانت\n🧬 اسپرم (بورس): {sp}\n💸 بدهی: {d} سانت"
+        f"📊 پروفایل شما\n\n🍆 اندازه: {s} سانت\n🧬 اسپرم (بورس): {sp}\n💸 بدهی: {d} سانت\n🎟 توکن بازی: {get_tokens(m.chat.id, m.from_user.id)}"
     )
 
 @dp.message(Command("tosperm"))
@@ -957,8 +1007,12 @@ async def accept(q:CallbackQuery):
     c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?",(bet,chat_id,loser))
     c.execute("UPDATE battles SET active=0 WHERE id=?",(bid,))
     db.commit()
+    token_line = ""
+    if random.random() < DUEL_TOKEN_CHANCE:
+        add_tokens(chat_id, winner, 1)
+        token_line = "\n🎟 جایزه‌ی ویژه: یه توکن بازی هم به برنده رسید!"
     winner_name=get_name(chat_id,winner)
-    await q.message.edit_text(f"🏆 پایان دوئل!\n\n👑 برنده: {winner_name}\n💰 جایزه: {bet} سانت\n🏅 +{RANK_WIN_RP} RP برنده | -{RANK_LOSS_RP} RP بازنده\n\n😂 بازنده باید بیشتر تمرین کنه!")
+    await q.message.edit_text(f"🏆 پایان دوئل!\n\n👑 برنده: {winner_name}\n💰 جایزه: {bet} سانت{token_line}\n🏅 +{RANK_WIN_RP} RP برنده | -{RANK_LOSS_RP} RP بازنده\n\n😂 بازنده باید بیشتر تمرین کنه!")
 
 
 # ===== Mafia Team PvP System =====
@@ -3021,6 +3075,46 @@ async def company_dividend_loop(bot):
                 pass
 # ================== پایان کمپانی کیر ==================
 
+# ===== خرید و دیدن توکن =====
+@dp.message(Command("token", "tokens"))
+async def token_info(m: Message):
+    user(m.chat.id, m.from_user.id, m.from_user.full_name)
+    size_cm = get_size(m.chat.id, m.from_user.id)
+    await m.reply(
+        f"🎟 توکن‌های تو: {get_tokens(m.chat.id, m.from_user.id)}\n\n"
+        f"💰 قیمت هر توکن الان: {token_price(size_cm)} سانت ({int(TOKEN_PRICE_PCT*100)}٪ سایزت — سایزت الان {size_cm} سانته)\n"
+        f"🛒 /buytoken [تعداد] — خرید (حداکثر {TOKEN_MAX_BUY} تا تو هر خرید)\n\n"
+        "🎮 هر دست /box و /climb و /bj ۱ توکن می‌خواد.\n"
+        f"⚔️ برنده‌ی دوئل با {int(DUEL_TOKEN_CHANCE*100)}٪ شانس یه توکن هم می‌گیره."
+    )
+
+@dp.message(Command("buytoken", "buytokens"))
+async def buy_token(m: Message):
+    uid, chat_id = m.from_user.id, m.chat.id
+    user(chat_id, uid, m.from_user.full_name)
+    args = m.text.split()[1:]
+    if not args:
+        n = 1
+    elif args[0].isdigit():
+        n = int(args[0])
+    else:
+        return await m.reply("استفاده: /buytoken [تعداد]  (مثلاً /buytoken 3)")
+    if n < 1 or n > TOKEN_MAX_BUY:
+        return await m.reply(f"❌ تعداد باید بین ۱ تا {TOKEN_MAX_BUY} باشه.")
+    size_cm = get_size(chat_id, uid)
+    price = token_price(size_cm)
+    total = price * n
+    if size_cm < total:
+        return await m.reply(f"❌ سانت کافی نداری. {n} توکن = {total} سانت (هر توکن {price}) ولی سایزت {size_cm} سانته.")
+    c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (total, chat_id, uid))
+    db.commit()
+    add_tokens(chat_id, uid, n)
+    await m.reply(
+        f"✅ {n} توکن خریدی!\n"
+        f"💸 {total} سانت کم شد (هر توکن {price} سانت)\n"
+        f"🎟 توکن‌هات: {get_tokens(chat_id, uid)} | 📏 سایزت: {get_size(chat_id, uid)}"
+    )
+
 # ===== مینی‌گیم: جعبه‌ی شانس 🎁 =====
 # - /box [مبلغ] → ۴ تا جعبه‌ی بسته میاد؛ یکی رو انتخاب می‌کنی
 # - تو هر دور یه جعبه‌ی 💎 (۳ برابر شرط)، یه 🔄 (شرط برمی‌گرده) و دوتا 💣 (شرط می‌سوزه) هست
@@ -3039,7 +3133,7 @@ async def box_start(m: Message):
     args = m.text.split()[1:]
     if not args or not args[0].isdigit():
         return await m.reply(f"🎁 جعبه‌ی شانس\n\nاستفاده: /box [مبلغ شرط]\n(حداکثر {BOX_MAX_BET} سانت)\n\n"
-                             "۴ تا جعبه هست: 💎 (۳ برابر) | 🔄 (شرطت برمی‌گرده) | 💣💣 (شرط می‌سوزه)")
+                             "۴ تا جعبه هست: 💎 (۳ برابر) | 🔄 (شرطت برمی‌گرده) | 💣💣 (شرط می‌سوزه)\n\n🎟 ورودی: ۱ توکن (/buytoken)")
     bet = int(args[0])
     uid = m.from_user.id
     user(m.chat.id, uid, m.from_user.full_name)
@@ -3047,6 +3141,8 @@ async def box_start(m: Message):
         return await m.reply(f"❌ شرط باید بین ۱ تا {BOX_MAX_BET} سانت باشه.")
     if get_size(m.chat.id, uid) < bet:
         return await m.reply("❌ سانت کافی نداری.")
+    if not take_token(m.chat.id, uid):
+        return await m.reply(no_token_text(m.chat.id, uid))
     now = int(time.time())
     for k in [k for k, g in BOX_GAMES.items() if now - g["ts"] > BOX_TTL]:
         BOX_GAMES.pop(k, None)
@@ -3059,7 +3155,7 @@ async def box_start(m: Message):
     ]])
     await m.reply(
         f"🎁 جعبه‌ی شانس — {m.from_user.full_name}\n"
-        f"💰 شرط: {bet} سانت\n\n"
+        f"💰 شرط: {bet} سانت | 🎟 ۱ توکن خرج شد (باقی: {get_tokens(m.chat.id, uid)})\n\n"
         f"یه جعبه انتخاب کن! ({BOX_TTL//60} دقیقه وقت داری)\n"
         f"💎 ×۳ | 🔄 ×۱ | 💣 ×۰ (دوتا)",
         reply_markup=kb
@@ -3171,7 +3267,7 @@ async def climb_start(m: Message):
         return await m.reply(
             f"🪜 نردبان\n\nاستفاده: /climb [مبلغ شرط]\n(حداکثر {CLIMB_MAX_BET} سانت)\n\n"
             f"هر پله {int(CLIMB_P*100)}٪ شانس داره و ضریبت بزرگ‌تر می‌شه، ولی با ۲۵٪ می‌افتی و همه‌چی می‌سوزه. "
-            f"هر وقت خواستی «برداشت» رو بزن!"
+            f"هر وقت خواستی «برداشت» رو بزن!\n\n🎟 ورودی: ۱ توکن (/buytoken)"
         )
     bet = int(args[0])
     uid, chat_id = m.from_user.id, m.chat.id
@@ -3188,6 +3284,8 @@ async def climb_start(m: Message):
         return await m.reply(f"❌ شرط باید بین ۱ تا {CLIMB_MAX_BET} سانت باشه.")
     if get_size(chat_id, uid) < bet:
         return await m.reply("❌ سانت کافی نداری.")
+    if not take_token(chat_id, uid):
+        return await m.reply(no_token_text(chat_id, uid))
     c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (bet, chat_id, uid))
     c.execute("INSERT OR REPLACE INTO climb_games(chat_id,user_id,bet,step,ts,msg_id) VALUES(?,?,?,0,?,0)", (chat_id, uid, bet, now))
     db.commit()
@@ -3196,6 +3294,7 @@ async def climb_start(m: Message):
         sent = await m.reply(txt, reply_markup=kb)
     except Exception:
         climb_cash(chat_id, uid, bet, 0)  # ارسال خراب شد: شرط برگرده
+        add_tokens(chat_id, uid, 1)       # توکن هم برگرده
         raise
     c.execute("UPDATE climb_games SET msg_id=? WHERE chat_id=? AND user_id=?", (sent.message_id, chat_id, uid))
     db.commit()
@@ -3379,7 +3478,7 @@ async def bj_start(m: Message):
         return await m.reply(
             f"🃏 بلک‌جک (۲۱)\n\nاستفاده: /bj [مبلغ شرط]\n(حداکثر {BJ_MAX_BET} سانت)\n\n"
             "به ۲۱ نزدیک شو ولی ردش نکن! دیلر تا ۱۷ کارت می‌گیره.\n"
-            "برد ×۲ | بلک‌جک ×۲.۵ | مساوی = شرطت برمی‌گرده"
+            "برد ×۲ | بلک‌جک ×۲.۵ | مساوی = شرطت برمی‌گرده\n\n🎟 ورودی: ۱ توکن (/buytoken)"
         )
     bet = int(args[0])
     uid, chat_id = m.from_user.id, m.chat.id
@@ -3396,6 +3495,8 @@ async def bj_start(m: Message):
         return await m.reply(f"❌ شرط باید بین ۱ تا {BJ_MAX_BET} سانت باشه.")
     if get_size(chat_id, uid) < bet:
         return await m.reply("❌ سانت کافی نداری.")
+    if not take_token(chat_id, uid):
+        return await m.reply(no_token_text(chat_id, uid))
     deck = bj_new_deck()
     player = [deck.pop(), deck.pop()]
     dealer = [deck.pop(), deck.pop()]
@@ -3421,6 +3522,7 @@ async def bj_start(m: Message):
         sent = await m.reply(bj_render(name, g, False), reply_markup=bj_kb(uid))
     except Exception:
         bj_settle(chat_id, uid, bet)  # ارسال خراب شد: شرط برگرده
+        add_tokens(chat_id, uid, 1)   # توکن هم برگرده
         raise
     c.execute("UPDATE blackjack_games SET msg_id=? WHERE chat_id=? AND user_id=?", (sent.message_id, chat_id, uid))
     db.commit()
@@ -3478,7 +3580,9 @@ async def main():
         BotCommand(command="tosperm", description="🧬 تبدیل سانت به اسپرم"),
         BotCommand(command="tocent", description="💰 تبدیل اسپرم به سانت"),
         BotCommand(command="top", description="🏆 جدول بزرگان"),
-        BotCommand(command="box", description="🎁 مینی‌گیم جعبه‌ی شانس"),
+        BotCommand(command="token", description="🎟 توکن‌های من و قیمت توکن"),
+        BotCommand(command="buytoken", description="🛒 خرید توکن بازی"),
+        BotCommand(command="box", description="🎁 مینی‌گیم جعبه‌ی شانس (۱ توکن)"),
         BotCommand(command="climb", description="🪜 مینی‌گیم نردبان"),
         BotCommand(command="bj", description="🃏 بلک‌جک (۲۱)"),
         BotCommand(command="market", description="🛒 بازار سلبریتی"),
