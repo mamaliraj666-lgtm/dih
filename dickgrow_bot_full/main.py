@@ -111,7 +111,25 @@ c.execute("""CREATE TABLE IF NOT EXISTS farm_records(
     spent_cm INTEGER DEFAULT 0,
     PRIMARY KEY(chat_id, user_id)
 )""")
+c.execute("""CREATE TABLE IF NOT EXISTS auctions(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER,
+    name TEXT,
+    photo TEXT,
+    status TEXT DEFAULT 'active',
+    top_bid INTEGER DEFAULT 0,
+    top_bidder INTEGER DEFAULT 0,
+    top_bidder_name TEXT DEFAULT '',
+    last_activity INTEGER,
+    created_at INTEGER,
+    msg_id INTEGER DEFAULT 0
+)""")
 db.commit()
+try:
+    c.execute("ALTER TABLE auctions ADD COLUMN msg_id INTEGER DEFAULT 0")
+    db.commit()
+except sqlite3.OperationalError:
+    pass
 
 SPERM_RATE = 2  # ۱ سانت = ۲ اسپرم (واحد جداگانه‌ی بخش بورس)
 
@@ -200,6 +218,15 @@ HELP_SECTIONS = {
         "🌾 /farmrank — رنک مزرعه‌ی خودت، بر اساس دقیقاً چیزی که الان تو زمین‌ها و انبارته\n"
         "📊 /farmleader — جدول رنک مزرعه‌ی کل گروه"
     ),
+    "auction": (
+        "🔨 مزایده",
+        "🔨 /bid [مبلغ] — پیشنهاد دادن (اگه چندتا مزایده همزمان فعاله: /bid [شماره] [مبلغ] یا ریپلای روی عکس همون مزایده)\n"
+        "📋 /auctionstatus — دیدن همه‌ی مزایده‌های فعال، بالاترین پیشنهادها و زمان باقی‌مونده\n\n"
+        "سانت پیشنهادت همون لحظه بلوکه می‌شه و اگه کسی بالاتر بده برمی‌گرده. هر پیشنهاد جدید تایمر ۱۲ ساعته‌ی همون مزایده رو از اول می‌کنه؛ هرکس ۱۲ ساعت بدون پیشنهاد بالاتر بمونه برنده‌ست.\n\n"
+        "ادمین:\n"
+        "🔨 /auction [file_id] [اسم] — شروع یه مزایده‌ی جدید (یا ریپلای رو یه عکس: /auction [اسم])؛ هرچندتا که بخوای همزمان\n"
+        "🏁 /endauction [شماره] — پایان زودتر یه مزایده؛ با /endauction [شماره] cancel لغو می‌شه و پول برمی‌گرده"
+    ),
 }
 
 @dp.message(Command("help"))
@@ -211,6 +238,7 @@ async def help_cmd(m: Message):
         [InlineKeyboardButton(text="🌟 سلبریتی‌ها", callback_data="help:celeb")],
         [InlineKeyboardButton(text="📈 بورس", callback_data="help:bourse")],
         [InlineKeyboardButton(text="🌾 مزرعه", callback_data="help:farm")],
+        [InlineKeyboardButton(text="🔨 مزایده", callback_data="help:auction")],
     ])
     await m.reply(
         "📖 راهنمای بازی\n\n"
@@ -228,6 +256,7 @@ async def help_section(q: CallbackQuery):
         [InlineKeyboardButton(text="🌟 سلبریتی‌ها", callback_data="help:celeb")],
         [InlineKeyboardButton(text="📈 بورس", callback_data="help:bourse")],
         [InlineKeyboardButton(text="🌾 مزرعه", callback_data="help:farm")],
+        [InlineKeyboardButton(text="🔨 مزایده", callback_data="help:auction")],
     ])
     if key == "back" or key not in HELP_SECTIONS:
         await q.message.edit_text("📖 راهنمای بازی\n\nیه بخش رو انتخاب کن تا کامندهاش رو ببینی:", reply_markup=main_kb)
@@ -1234,7 +1263,7 @@ CELEBS = {
     "Sophie Tatcher": ("A",350,262,"AgACAgQAAxkBAAEiLExqlZBP5UH5p9rTTAUQ6hv3_mUpkAAC_g9rG8igqVABEzpZosgbbAEAAwIAA3MAAz0E"),
     "Billie Eilish": ("S",542,438,"AgACAgQAAxkBAAEii01qpsO9jfgwqGNaCOuxcDI2B_tolAACLRFrG-cKCVH7fF__m9zGrQEAAwIAA3MAAz0E"),
     "Folorance Pugh": ("B",175,88,"AgACAgQAAxkBAAEiizBqpr485700NYU6jwetz6qFBbBYrgAC9g9rGxHWOFFkMl6wX7RergEAAwIAA3MAAz0E"),
-    }
+}
 
 
 TIER_CELEBS = {
@@ -1811,6 +1840,209 @@ async def check_loans(bot):
                 pass
 
 
+# ===== مزایده (چندتا همزمان) =====
+AUCTION_IDLE_SECONDS = 12 * 3600   # اگه ۱۲ ساعت پیشنهاد بالاتری نیومد، آخرین پیشنهاد برنده‌ست
+AUCTION_START_BID = 10             # حداقل پیشنهاد اول (سانت)
+AUCTION_MIN_INCREMENT = 5          # حداقل افزایش نسبت به پیشنهاد قبلی (سانت)
+
+_AUCTION_COLS = "id,name,photo,top_bid,top_bidder,top_bidder_name,last_activity,msg_id"
+
+def get_active_auctions(chat_id):
+    return c.execute(
+        f"SELECT {_AUCTION_COLS} FROM auctions WHERE chat_id=? AND status='active' ORDER BY id", (chat_id,)
+    ).fetchall()
+
+def resolve_auction(m, token=None):
+    """مزایده‌ی موردنظر رو پیدا می‌کنه: با شماره، یا ریپلای روی عکسش، یا اگه فقط یکی فعاله همون.
+    خروجی: (ردیف مزایده یا None، متن خطا یا None)"""
+    rows = get_active_auctions(m.chat.id)
+    if not rows:
+        return None, "📭 الان هیچ مزایده‌ای در جریان نیست."
+    if token is not None:
+        for r in rows:
+            if r[0] == token:
+                return r, None
+        return None, f"❌ مزایده‌ی فعالی با شماره‌ی #{token} پیدا نشد."
+    if m.reply_to_message:
+        rid = m.reply_to_message.message_id
+        for r in rows:
+            if r[7] == rid:
+                return r, None
+    if len(rows) == 1:
+        return rows[0], None
+    listing = "\n".join(f"• #{r[0]} — {r[1]}" for r in rows)
+    return None, f"📊 چندتا مزایده همزمان فعاله، مشخص کن کدوم:\n{listing}\n\n(شماره‌ش رو بنویس یا روی عکس همون مزایده ریپلای کن)"
+
+async def finalize_auction(bot, auction_id, cancel=False):
+    row = c.execute("SELECT chat_id,name,top_bid,top_bidder,top_bidder_name,status FROM auctions WHERE id=?", (auction_id,)).fetchone()
+    if not row or row[5] != 'active':
+        return False
+    chat_id, name, top_bid, top_bidder, top_bidder_name, _ = row
+    c.execute("UPDATE auctions SET status=? WHERE id=?", ('cancelled' if cancel else 'ended', auction_id))
+    if cancel and top_bidder:
+        c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (top_bid, chat_id, top_bidder))
+    delivered = False
+    if not cancel and top_bidder and name in CELEBS:
+        c.execute("INSERT INTO collections(chat_id,user_id,celeb,paid_price) VALUES(?,?,?,?)", (chat_id, top_bidder, name, top_bid))
+        delivered = True
+    db.commit()
+    if cancel:
+        txt = f"🔨 مزایده‌ی #{auction_id} («{name}») لغو شد."
+        if top_bidder:
+            txt += f"\n💸 {top_bid} سانت به {top_bidder_name} برگشت."
+    elif not top_bidder:
+        txt = f"🔨 مزایده‌ی #{auction_id} («{name}») تموم شد ولی هیچ‌کس پیشنهادی نداد."
+    else:
+        txt = (
+            f"🔨 مزایده‌ی #{auction_id} تموم شد!\n\n"
+            f"🎁 {name}\n"
+            f"👑 برنده: {top_bidder_name}\n"
+            f"💰 مبلغ نهایی: {top_bid} سانت"
+        )
+        if delivered:
+            txt += "\n\n✅ به کلکسیون برنده اضافه شد!"
+    try:
+        await bot.send_message(chat_id, txt)
+    except Exception:
+        logger.exception("auction announce failed")
+    return True
+
+async def auction_loop(bot):
+    while True:
+        await asyncio.sleep(60)
+        try:
+            now = int(time.time())
+            due = c.execute(
+                "SELECT id FROM auctions WHERE status='active' AND ?-last_activity>=?",
+                (now, AUCTION_IDLE_SECONDS)
+            ).fetchall()
+            for (aid,) in due:
+                await finalize_auction(bot, aid)
+        except Exception:
+            logger.exception("auction_loop error")
+
+@dp.message(Command("auction"))
+async def auction_start(m: Message):
+    if m.from_user.id not in ADMIN_IDS:
+        return await m.reply("❌ دسترسی ندارید!")
+    if m.chat.type == "private":
+        return await m.reply("❌ این دستور رو باید تو گروه بزنی.")
+    raw = m.text.split(maxsplit=1)
+    args = raw[1].strip() if len(raw) > 1 else ""
+    photo = name = None
+    if m.reply_to_message and m.reply_to_message.photo:
+        photo = m.reply_to_message.photo[-1].file_id
+        name = args
+    else:
+        parts = args.split(maxsplit=1)
+        if len(parts) == 2:
+            photo, name = parts[0], parts[1].strip()
+    if not photo or not name:
+        return await m.reply(
+            "استفاده:\n/auction [file_id عکس] [اسم]\n\n"
+            "یا روی یه عکس ریپلای کن و بنویس:\n/auction [اسم]\n\n"
+            "می‌تونی هرچندتا مزایده همزمان بذاری."
+        )
+    now = int(time.time())
+    cur = c.execute(
+        "INSERT INTO auctions(chat_id,name,photo,status,last_activity,created_at) VALUES(?,?,?,'active',?,?)",
+        (m.chat.id, name, photo, now, now)
+    )
+    aid = cur.lastrowid
+    db.commit()
+    caption = (
+        f"🔨 مزایده‌ی #{aid} شروع شد!\n\n"
+        f"🎁 {name}\n"
+        f"💰 حداقل پیشنهاد اول: {AUCTION_START_BID} سانت\n"
+        f"📈 هر پیشنهاد جدید حداقل {AUCTION_MIN_INCREMENT} سانت بیشتر از قبلی\n"
+        f"⏳ هرکس {AUCTION_IDLE_SECONDS//3600} ساعت بدون پیشنهاد بالاتر بمونه، برنده‌ست (هر پیشنهاد جدید تایمر رو از اول می‌کنه)\n\n"
+        f"برای پیشنهاد: /bid {aid} [مبلغ]\n"
+        f"یا روی همین عکس ریپلای کن و بنویس /bid [مبلغ]"
+    )
+    try:
+        sent = await m.bot.send_photo(m.chat.id, photo, caption=caption)
+    except (TelegramBadRequest, TelegramForbiddenError):
+        c.execute("DELETE FROM auctions WHERE id=?", (aid,))
+        db.commit()
+        return await m.reply("❌ این file_id معتبر نیست یا برای این ربات کار نمی‌کنه. با /getfileid یه file_id درست بگیر.")
+    c.execute("UPDATE auctions SET msg_id=? WHERE id=?", (sent.message_id, aid))
+    db.commit()
+
+@dp.message(Command("bid"))
+async def auction_bid(m: Message):
+    if m.chat.type == "private":
+        return await m.reply("❌ پیشنهاد رو باید تو گروه بدی.")
+    args = [a.lstrip("#") for a in m.text.split()[1:]]
+    token = None
+    try:
+        if len(args) == 1:
+            amount = int(args[0])
+        elif len(args) == 2:
+            token, amount = int(args[0]), int(args[1])
+        else:
+            raise ValueError
+    except ValueError:
+        return await m.reply("استفاده:\n/bid [مبلغ]\n/bid [شماره‌ی مزایده] [مبلغ]\n\n(یا روی عکس مزایده ریپلای کن و بنویس /bid [مبلغ])")
+    a, err = resolve_auction(m, token)
+    if err:
+        return await m.reply(err)
+    aid, item, _photo, top_bid, top_bidder, top_name, _last, _mid = a
+    uid = m.from_user.id
+    user(m.chat.id, uid, m.from_user.full_name)
+    min_required = AUCTION_START_BID if not top_bidder else top_bid + AUCTION_MIN_INCREMENT
+    if amount < min_required:
+        return await m.reply(f"❌ پیشنهادت برای مزایده‌ی #{aid} باید حداقل {min_required} سانت باشه.")
+    available = get_size(m.chat.id, uid) + (top_bid if top_bidder == uid else 0)
+    if available < amount:
+        return await m.reply("❌ سانت کافی نداری.")
+    if top_bidder and top_bidder != uid:
+        c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (top_bid, m.chat.id, top_bidder))
+    if top_bidder == uid:
+        c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (amount - top_bid, m.chat.id, uid))
+    else:
+        c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (amount, m.chat.id, uid))
+    c.execute(
+        "UPDATE auctions SET top_bid=?, top_bidder=?, top_bidder_name=?, last_activity=? WHERE id=?",
+        (amount, uid, m.from_user.full_name, int(time.time()), aid)
+    )
+    db.commit()
+    await m.reply(
+        f"🔨 {m.from_user.full_name} پیشنهاد {amount} سانت داد برای «{item}» (مزایده‌ی #{aid})!\n"
+        f"⏳ تایمر {AUCTION_IDLE_SECONDS//3600} ساعته‌ی این مزایده از اول شروع شد."
+    )
+    if top_bidder and top_bidder != uid:
+        try:
+            await m.bot.send_message(top_bidder, f"⚠️ پیشنهادت روی «{item}» (#{aid}) رد شد و {top_bid} سانتت برگشت. یکی {amount} سانت داد!")
+        except Exception:
+            pass
+
+@dp.message(Command("auctionstatus"))
+async def auction_status(m: Message):
+    rows = get_active_auctions(m.chat.id)
+    if not rows:
+        return await m.reply("📭 الان هیچ مزایده‌ای در جریان نیست.")
+    now = int(time.time())
+    txt = f"🔨 مزایده‌های فعال ({len(rows)} تا)\n\n"
+    for aid, item, _p, top_bid, top_bidder, top_name, last, _mid in rows:
+        left = AUCTION_IDLE_SECONDS - (now - last)
+        bid_txt = f"{top_bid} سانت ({top_name})" if top_bidder else "هنوز پیشنهادی نیومده"
+        txt += f"#{aid} 🎁 {item}\n   💰 {bid_txt}\n   ⏳ {fmt_time(left)} تا پایان (اگه پیشنهاد بالاتری نیاد)\n\n"
+    txt += "برای پیشنهاد: /bid [شماره] [مبلغ]"
+    await m.reply(txt)
+
+@dp.message(Command("endauction"))
+async def auction_end(m: Message):
+    if m.from_user.id not in ADMIN_IDS:
+        return await m.reply("❌ دسترسی ندارید!")
+    tokens = m.text.split()[1:]
+    cancel = any(t.lower() == "cancel" for t in tokens)
+    nums = [t.lstrip("#") for t in tokens if t.lower() != "cancel"]
+    token = int(nums[0]) if nums and nums[0].isdigit() else None
+    a, err = resolve_auction(m, token)
+    if err:
+        return await m.reply(err + "\n\nمثال: /endauction [شماره]  یا  /endauction [شماره] cancel")
+    await finalize_auction(m.bot, a[0], cancel=cancel)
+
 @dp.message(Command("addcm"))
 async def addcm(m:Message):
     if m.from_user.id not in ADMIN_IDS:
@@ -1867,7 +2099,7 @@ async def reset_group(m: Message):
         "game_loans", "mafia_battles", "mafia2_battles", "collections",
         "company_rounds", "company_options", "company_investments",
         "company_participants", "owned_companies",
-        "farm_tiles", "farm_inventory", "farm_records",
+        "farm_tiles", "farm_inventory", "farm_records", "auctions",
     ):
         c.execute(f"DELETE FROM {table} WHERE chat_id=?", (chat_id,))
     # جدول‌هایی که فقط از طریق battle_id به گروه وصلن
@@ -2474,6 +2706,10 @@ async def main():
         BotCommand(command="cashout", description="💸 نقد کردن نصف ارزش کمپانی"),
         BotCommand(command="addcm", description="➕ افزودن سانت به کاربر (ادمین)"),
         BotCommand(command="luckydrop", description="🎉 دادن سانت به یه بازیکن رندوم (ادمین)"),
+        BotCommand(command="bid", description="🔨 پیشنهاد دادن تو مزایده"),
+        BotCommand(command="auctionstatus", description="📋 وضعیت مزایده‌های فعال"),
+        BotCommand(command="auction", description="🔨 شروع مزایده (ادمین)"),
+        BotCommand(command="endauction", description="🏁 پایان مزایده (ادمین)"),
         BotCommand(command="resetgroup", description="⚠️ پاک کردن کامل داده‌های این گروه (ادمین)"),
         BotCommand(command="addsperm", description="➕ افزودن اسپرم به کاربر (ادمین)"),
         BotCommand(command="addspermall", description="➕ افزودن اسپرم به همه (ادمین)"),
@@ -2484,6 +2720,7 @@ async def main():
     await bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats())
     asyncio.create_task(check_loans(bot))
     asyncio.create_task(company_dividend_loop(bot))
+    asyncio.create_task(auction_loop(bot))
     await dp.start_polling(bot)
 
 if __name__=="__main__":
