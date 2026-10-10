@@ -222,6 +222,7 @@ HELP_SECTIONS = {
         "🔨 مزایده",
         "🔨 /bid [مبلغ] — پیشنهاد دادن (اگه چندتا مزایده همزمان فعاله: /bid [شماره] [مبلغ] یا ریپلای روی عکس همون مزایده)\n"
         "📋 /auctionstatus — دیدن همه‌ی مزایده‌های فعال، بالاترین پیشنهادها و زمان باقی‌مونده\n"
+        "🗂 /aucol — کالکشن همه‌ی مزایده‌های فعال با عکس، بالاترین پیشنهاد، حداقل پیشنهاد بعدی و زمان باقی‌مونده\n"
         "🖼 /bidcol — کالکشن مزایده‌ی تو: سلبریتی‌هایی که الان بالاترین پیشنهاد روشونه (با عکس) + مجموعشون و سانتی که بعد خرید همه می‌مونه (ریپلای کنی مال یکی دیگه رو می‌بینی)\n"
         "❌ /cancelbid [شماره] — لغو بالاترین پیشنهادت (کل سانتش برمی‌گرده و مزایده بدون پیشنهاد می‌مونه؛ دکمه‌ی لغو تو /bidcol هم همینو انجام میده)\n\n"
         "سانت پیشنهادت همون لحظه بلوکه می‌شه و اگه کسی بالاتر بده برمی‌گرده. هر پیشنهاد جدید تایمر ۱۲ ساعته‌ی همون مزایده رو از اول می‌کنه؛ هرکس ۱۲ ساعت بدون پیشنهاد بالاتر بمونه برنده‌ست.\n\n"
@@ -2228,6 +2229,85 @@ async def cancel_bid_btn(q: CallbackQuery):
     except Exception as e:
         logger.warning("cancel_bid_btn refresh failed: %s", e)
 
+# ===== کالکشن مزایده‌های فعال (همه‌ی مزایده‌های در جریان، با عکس) =====
+def build_aucol_page(chat_id, page):
+    """خروجی: (متن، file_id عکس، کیبورد) یا (None, None, None) اگه مزایده‌ی فعالی نباشه."""
+    rows = get_active_auctions(chat_id)
+    if not rows:
+        return None, None, None
+    page = max(0, min(page, len(rows) - 1))
+    aid, name, photo, top_bid, top_bidder, top_name, last, _mid = rows[page]
+    if top_bidder:
+        bid_txt = f"{top_bid} سانت — 👑 {top_name}"
+        min_next = top_bid + AUCTION_MIN_INCREMENT
+    else:
+        bid_txt = "هنوز پیشنهادی نیومده"
+        min_next = AUCTION_START_BID
+    left = AUCTION_IDLE_SECONDS - (int(time.time()) - last)
+    txt = (
+        f"🔨 مزایده‌های فعال — {page+1}/{len(rows)}\n\n"
+        f"🎁 {name}\n"
+        f"🆔 مزایده‌ی #{aid}\n"
+        f"💰 بالاترین پیشنهاد: {bid_txt}\n"
+        f"📈 حداقل پیشنهاد بعدی: {min_next} سانت\n"
+        f"⏳ {fmt_time(left)} تا پایان (اگه پیشنهاد بالاتری نیاد)\n\n"
+        f"🔨 /bid {aid} {min_next}"
+    )
+    buttons = []
+    if page > 0:
+        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"acol:{page-1}"))
+    if page < len(rows) - 1:
+        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"acol:{page+1}"))
+    kb = InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
+    return txt, photo, kb
+
+@dp.message(Command("aucol"))
+async def auction_collection(m: Message):
+    txt, photo_ref, kb = build_aucol_page(m.chat.id, 0)
+    if not txt:
+        return await m.reply("📭 الان هیچ مزایده‌ای در جریان نیست.")
+    photo = await resolve_photo(photo_ref) if photo_ref else None
+    try:
+        if photo:
+            sent = await m.bot.send_photo(m.chat.id, photo, caption=txt, reply_markup=kb)
+            if isinstance(photo, BufferedInputFile):
+                cache_photo(photo_ref, sent)
+        else:
+            await m.bot.send_message(m.chat.id, txt, reply_markup=kb)
+    except Exception as e:
+        logger.warning("aucol photo failed: %s", e)
+        await m.bot.send_message(m.chat.id, txt, reply_markup=kb)
+
+@dp.callback_query(F.data.startswith("acol:"))
+async def auction_collection_nav(q: CallbackQuery):
+    page = int(q.data.split(":")[1])
+    txt, photo_ref, kb = build_aucol_page(q.message.chat.id, page)
+    if not txt:
+        try:
+            if q.message.photo:
+                await q.message.edit_caption(caption="📭 دیگه مزایده‌ی فعالی نمونده.", reply_markup=None)
+            else:
+                await q.message.edit_text("📭 دیگه مزایده‌ی فعالی نمونده.", reply_markup=None)
+        except Exception:
+            pass
+        return await q.answer()
+    photo = await resolve_photo(photo_ref) if photo_ref else None
+    try:
+        if photo and q.message.photo:
+            edited = await q.message.edit_media(media=InputMediaPhoto(media=photo, caption=txt), reply_markup=kb)
+            if isinstance(photo, BufferedInputFile) and hasattr(edited, "photo"):
+                cache_photo(photo_ref, edited)
+        elif q.message.photo:
+            await q.message.edit_caption(caption=txt, reply_markup=kb)
+        else:
+            await q.message.edit_text(txt, reply_markup=kb)
+    except TelegramBadRequest as e:
+        if "not modified" not in str(e).lower():
+            return await q.answer(f"خطا: {e}", show_alert=True)
+    except Exception as e:
+        return await q.answer(f"خطا: {e}", show_alert=True)
+    await q.answer()
+
 @dp.message(Command("endauction"))
 async def auction_end(m: Message):
     if m.from_user.id not in ADMIN_IDS:
@@ -2906,6 +2986,7 @@ async def main():
         BotCommand(command="luckydrop", description="🎉 دادن سانت به یه بازیکن رندوم (ادمین)"),
         BotCommand(command="bid", description="🔨 پیشنهاد دادن تو مزایده"),
         BotCommand(command="auctionstatus", description="📋 وضعیت مزایده‌های فعال"),
+        BotCommand(command="aucol", description="🗂 کالکشن مزایده‌های فعال"),
         BotCommand(command="bidcol", description="🖼 کالکشن مزایده‌ی من (بالاترین پیشنهادها)"),
         BotCommand(command="cancelbid", description="❌ لغو پیشنهاد من تو مزایده"),
         BotCommand(command="auction", description="🔨 شروع مزایده (ادمین)"),
