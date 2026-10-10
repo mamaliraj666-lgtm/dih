@@ -222,7 +222,8 @@ HELP_SECTIONS = {
         "🔨 مزایده",
         "🔨 /bid [مبلغ] — پیشنهاد دادن (اگه چندتا مزایده همزمان فعاله: /bid [شماره] [مبلغ] یا ریپلای روی عکس همون مزایده)\n"
         "📋 /auctionstatus — دیدن همه‌ی مزایده‌های فعال، بالاترین پیشنهادها و زمان باقی‌مونده\n"
-        "🖼 /bidcol — کالکشن مزایده‌ی تو: سلبریتی‌هایی که الان بالاترین پیشنهاد روشونه (با عکس) + مجموعشون و سانتی که بعد خرید همه می‌مونه (ریپلای کنی مال یکی دیگه رو می‌بینی)\n\n"
+        "🖼 /bidcol — کالکشن مزایده‌ی تو: سلبریتی‌هایی که الان بالاترین پیشنهاد روشونه (با عکس) + مجموعشون و سانتی که بعد خرید همه می‌مونه (ریپلای کنی مال یکی دیگه رو می‌بینی)\n"
+        "❌ /cancelbid [شماره] — لغو بالاترین پیشنهادت (کل سانتش برمی‌گرده و مزایده بدون پیشنهاد می‌مونه؛ دکمه‌ی لغو تو /bidcol هم همینو انجام میده)\n\n"
         "سانت پیشنهادت همون لحظه بلوکه می‌شه و اگه کسی بالاتر بده برمی‌گرده. هر پیشنهاد جدید تایمر ۱۲ ساعته‌ی همون مزایده رو از اول می‌کنه؛ هرکس ۱۲ ساعت بدون پیشنهاد بالاتر بمونه برنده‌ست.\n\n"
         "ادمین:\n"
         "🔨 /auction [file_id] [اسم] — شروع یه مزایده‌ی جدید (یا ریپلای رو یه عکس: /auction [اسم])؛ هرچندتا که بخوای همزمان\n"
@@ -2073,7 +2074,9 @@ def build_bidcol_page(chat_id, owner_id, page):
         buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"bcol:{owner_id}:{page-1}"))
     if page < len(rows) - 1:
         buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"bcol:{owner_id}:{page+1}"))
-    kb = InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
+    rows_kb = [buttons] if buttons else []
+    rows_kb.append([InlineKeyboardButton(text="❌ لغو این پیشنهاد", callback_data=f"cbid:{owner_id}:{aid}")])
+    kb = InlineKeyboardMarkup(inline_keyboard=rows_kb)
     return txt, photo, kb
 
 @dp.message(Command("bidcol"))
@@ -2131,6 +2134,99 @@ async def bid_collection_nav(q: CallbackQuery):
     except Exception as e:
         return await q.answer(f"خطا: {e}", show_alert=True)
     await q.answer()
+
+# ===== لغو پیشنهاد =====
+# - فقط کسی که الان بالاترین پیشنهاد رو داره می‌تونه لغو کنه
+# - کل مبلغ بلوکه‌شده برمی‌گرده و مزایده بدون پیشنهاد می‌مونه
+#   (پیشنهاد نفر قبلی از وقتی ردش کردن برگشته، پس چیزی برای برگردوندن بهش نیست)
+# - تایمر مزایده از اول شروع می‌شه
+def cancel_top_bid(chat_id, uid, aid):
+    """خروجی: (موفق؟، پیام)"""
+    row = c.execute(
+        "SELECT name,top_bid,top_bidder FROM auctions WHERE id=? AND chat_id=? AND status='active'",
+        (aid, chat_id)
+    ).fetchone()
+    if not row:
+        return False, "❌ این مزایده دیگه فعال نیست."
+    name, top_bid, top_bidder = row
+    if top_bidder != uid:
+        return False, "❌ الان بالاترین پیشنهاد مال تو نیست، چیزی برای لغو نداری."
+    c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (top_bid, chat_id, uid))
+    c.execute(
+        "UPDATE auctions SET top_bid=0, top_bidder=0, top_bidder_name='', last_activity=? WHERE id=?",
+        (int(time.time()), aid)
+    )
+    db.commit()
+    return True, (
+        f"✅ پیشنهادت روی «{name}» (مزایده‌ی #{aid}) لغو شد.\n"
+        f"💸 {top_bid} سانت بهت برگشت. سانت فعلی: {get_size(chat_id, uid)}\n"
+        f"🔨 مزایده دوباره بدون پیشنهاده (حداقل پیشنهاد اول: {AUCTION_START_BID} سانت)."
+    )
+
+@dp.message(Command("cancelbid"))
+async def cancel_bid_cmd(m: Message):
+    if m.chat.type == "private":
+        return await m.reply("❌ این دستور رو باید تو گروه بزنی.")
+    uid = m.from_user.id
+    user(m.chat.id, uid, m.from_user.full_name)
+    mine = get_top_bid_auctions(m.chat.id, uid)
+    if not mine:
+        return await m.reply("📭 الان بالاترین پیشنهاد هیچ مزایده‌ای مال تو نیست.")
+    args = [a.lstrip("#") for a in m.text.split()[1:]]
+    mine_ids = {r[0] for r in mine}
+    aid = None
+    if args and args[0].isdigit():
+        aid = int(args[0])
+        if aid not in mine_ids:
+            return await m.reply(f"❌ تو الان بالاترین پیشنهاد مزایده‌ی #{aid} رو نداری.")
+    elif m.reply_to_message:
+        row = c.execute(
+            "SELECT id FROM auctions WHERE chat_id=? AND status='active' AND msg_id=?",
+            (m.chat.id, m.reply_to_message.message_id)
+        ).fetchone()
+        if row and row[0] in mine_ids:
+            aid = row[0]
+    if aid is None:
+        if len(mine) == 1:
+            aid = mine[0][0]
+        else:
+            listing = "\n".join(f"• #{r[0]} — {r[1]} ({r[3]} سانت)" for r in mine)
+            return await m.reply(
+                f"📊 چندتا پیشنهاد برتر داری، مشخص کن کدوم رو لغو کنم:\n{listing}\n\n"
+                f"مثال: /cancelbid {mine[0][0]}\n(یا از دکمه‌ی ❌ تو /bidcol استفاده کن)"
+            )
+    _ok, msg = cancel_top_bid(m.chat.id, uid, aid)
+    await m.reply(msg)
+
+@dp.callback_query(F.data.startswith("cbid:"))
+async def cancel_bid_btn(q: CallbackQuery):
+    _, owner_id, aid = q.data.split(":")
+    owner_id, aid = int(owner_id), int(aid)
+    if q.from_user.id != owner_id:
+        return await q.answer("❌ این پیشنهاد مال تو نیست!", show_alert=True)
+    ok, msg = cancel_top_bid(q.message.chat.id, owner_id, aid)
+    if not ok:
+        return await q.answer(msg, show_alert=True)
+    await q.answer("✅ پیشنهاد لغو شد و سانتت برگشت.", show_alert=True)
+    await q.message.reply(msg)
+    txt, photo_ref, kb = build_bidcol_page(q.message.chat.id, owner_id, 0)
+    try:
+        if not txt:
+            txt = f"🔨 دیگه بالاترین پیشنهاد هیچ مزایده‌ای مال تو نیست.\n📏 سانت آزاد: {get_size(q.message.chat.id, owner_id)}"
+            if q.message.photo:
+                await q.message.edit_caption(caption=txt, reply_markup=None)
+            else:
+                await q.message.edit_text(txt, reply_markup=None)
+            return
+        photo = await resolve_photo(photo_ref) if photo_ref else None
+        if photo and q.message.photo:
+            await q.message.edit_media(media=InputMediaPhoto(media=photo, caption=txt), reply_markup=kb)
+        elif q.message.photo:
+            await q.message.edit_caption(caption=txt, reply_markup=kb)
+        else:
+            await q.message.edit_text(txt, reply_markup=kb)
+    except Exception as e:
+        logger.warning("cancel_bid_btn refresh failed: %s", e)
 
 @dp.message(Command("endauction"))
 async def auction_end(m: Message):
@@ -2811,6 +2907,7 @@ async def main():
         BotCommand(command="bid", description="🔨 پیشنهاد دادن تو مزایده"),
         BotCommand(command="auctionstatus", description="📋 وضعیت مزایده‌های فعال"),
         BotCommand(command="bidcol", description="🖼 کالکشن مزایده‌ی من (بالاترین پیشنهادها)"),
+        BotCommand(command="cancelbid", description="❌ لغو پیشنهاد من تو مزایده"),
         BotCommand(command="auction", description="🔨 شروع مزایده (ادمین)"),
         BotCommand(command="endauction", description="🏁 پایان مزایده (ادمین)"),
         BotCommand(command="resetgroup", description="⚠️ پاک کردن کامل داده‌های این گروه (ادمین)"),
