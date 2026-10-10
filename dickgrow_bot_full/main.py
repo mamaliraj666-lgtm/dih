@@ -221,7 +221,8 @@ HELP_SECTIONS = {
     "auction": (
         "🔨 مزایده",
         "🔨 /bid [مبلغ] — پیشنهاد دادن (اگه چندتا مزایده همزمان فعاله: /bid [شماره] [مبلغ] یا ریپلای روی عکس همون مزایده)\n"
-        "📋 /auctionstatus — دیدن همه‌ی مزایده‌های فعال، بالاترین پیشنهادها و زمان باقی‌مونده\n\n"
+        "📋 /auctionstatus — دیدن همه‌ی مزایده‌های فعال، بالاترین پیشنهادها و زمان باقی‌مونده\n"
+        "🖼 /bidcol — کالکشن مزایده‌ی تو: سلبریتی‌هایی که الان بالاترین پیشنهاد روشونه (با عکس) + مجموعشون و سانتی که بعد خرید همه می‌مونه (ریپلای کنی مال یکی دیگه رو می‌بینی)\n\n"
         "سانت پیشنهادت همون لحظه بلوکه می‌شه و اگه کسی بالاتر بده برمی‌گرده. هر پیشنهاد جدید تایمر ۱۲ ساعته‌ی همون مزایده رو از اول می‌کنه؛ هرکس ۱۲ ساعت بدون پیشنهاد بالاتر بمونه برنده‌ست.\n\n"
         "ادمین:\n"
         "🔨 /auction [file_id] [اسم] — شروع یه مزایده‌ی جدید (یا ریپلای رو یه عکس: /auction [اسم])؛ هرچندتا که بخوای همزمان\n"
@@ -2030,6 +2031,107 @@ async def auction_status(m: Message):
     txt += "برای پیشنهاد: /bid [شماره] [مبلغ]"
     await m.reply(txt)
 
+# ===== کالکشن مزایده: سلبریتی‌هایی که الان بالاترین پیشنهاد روشونه =====
+# - هیچ سانت جدیدی کم/زیاد نمی‌شه؛ این بخش فقط نمایشیه (حساب‌وکتاب).
+# - /bid از قبل سانت پیشنهاد رو همون لحظه بلوکه می‌کنه، پس سانت «آزاد» الان یعنی
+#   همون چیزی که بعد از خریدن همه‌ی این سلبریتی‌ها برات می‌مونه.
+# - وقتی مزایده تموم بشه، سلبریتی خودکار میره تو /collection (finalize_auction)
+def get_top_bid_auctions(chat_id, uid):
+    return c.execute(
+        "SELECT id,name,photo,top_bid,last_activity FROM auctions "
+        "WHERE chat_id=? AND status='active' AND top_bidder=? ORDER BY top_bid DESC, id",
+        (chat_id, uid)
+    ).fetchall()
+
+def build_bidcol_page(chat_id, owner_id, page):
+    """خروجی: (متن، file_id عکس، کیبورد) یا (None, None, None) اگه چیزی نباشه."""
+    rows = get_top_bid_auctions(chat_id, owner_id)
+    if not rows:
+        return None, None, None
+    page = max(0, min(page, len(rows) - 1))
+    aid, name, photo, bid, last = rows[page]
+    total = sum(r[3] for r in rows)
+    free = get_size(chat_id, owner_id)
+    left = AUCTION_IDLE_SECONDS - (int(time.time()) - last)
+    owner_name = get_name(chat_id, owner_id)
+    txt = (
+        f"🔨 کالکشن مزایده‌ی {owner_name} — {page+1}/{len(rows)}\n\n"
+        f"👑 {name}\n"
+        f"🆔 مزایده‌ی #{aid}\n"
+        f"💰 بالاترین پیشنهاد (مال {owner_name}): {bid} سانت\n"
+        f"⏳ {fmt_time(left)} تا پایان (اگه پیشنهاد بالاتری نیاد)\n\n"
+        f"━━━━━━━━━━━━\n"
+        f"🧮 جمع حساب ({len(rows)} سلبریتی)\n"
+        f"💼 مجموع پیشنهادهای برتر: {total} سانت\n"
+        f"📏 سانت قبل از پیشنهادها: {free + total}\n"
+        f"➖ کم‌شده برای خریدشون: {total}\n"
+        f"✅ سانت باقی‌مونده اگه همه‌شون رو ببره: {free}\n"
+        f"(سانت پیشنهادها از قبل تو مزایده بلوکه شده؛ چیز جدیدی کم نمی‌شه)"
+    )
+    buttons = []
+    if page > 0:
+        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"bcol:{owner_id}:{page-1}"))
+    if page < len(rows) - 1:
+        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"bcol:{owner_id}:{page+1}"))
+    kb = InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
+    return txt, photo, kb
+
+@dp.message(Command("bidcol"))
+async def bid_collection(m: Message):
+    if m.reply_to_message and m.reply_to_message.from_user:
+        t = m.reply_to_message.from_user
+        user(m.chat.id, t.id, t.full_name)
+        owner_id, owner_name = t.id, t.full_name
+    else:
+        user(m.chat.id, m.from_user.id, m.from_user.full_name)
+        owner_id, owner_name = m.from_user.id, m.from_user.full_name
+    txt, photo_ref, kb = build_bidcol_page(m.chat.id, owner_id, 0)
+    if not txt:
+        return await m.reply(
+            f"🔨 {owner_name} الان بالاترین پیشنهاد هیچ مزایده‌ای رو نداره.\n"
+            f"📏 سانت آزاد: {get_size(m.chat.id, owner_id)}\n\n"
+            f"📋 /auctionstatus برای دیدن مزایده‌های فعال"
+        )
+    photo = await resolve_photo(photo_ref) if photo_ref else None
+    try:
+        if photo:
+            sent = await m.bot.send_photo(m.chat.id, photo, caption=txt, reply_markup=kb)
+            if isinstance(photo, BufferedInputFile):
+                cache_photo(photo_ref, sent)
+        else:
+            await m.bot.send_message(m.chat.id, txt, reply_markup=kb)
+    except Exception as e:
+        logger.warning("bidcol photo failed: %s", e)
+        await m.bot.send_message(m.chat.id, txt, reply_markup=kb)
+
+@dp.callback_query(F.data.startswith("bcol:"))
+async def bid_collection_nav(q: CallbackQuery):
+    _, owner_id, page = q.data.split(":")
+    owner_id, page = int(owner_id), int(page)
+    txt, photo_ref, kb = build_bidcol_page(q.message.chat.id, owner_id, page)
+    if not txt:
+        try:
+            await q.message.edit_caption(caption="🔨 دیگه پیشنهاد برتری برای این کاربر نمونده (مزایده‌ها تموم شدن یا کسی بالاتر داده).")
+        except Exception:
+            pass
+        return await q.answer()
+    photo = await resolve_photo(photo_ref) if photo_ref else None
+    try:
+        if photo and q.message.photo:
+            edited = await q.message.edit_media(media=InputMediaPhoto(media=photo, caption=txt), reply_markup=kb)
+            if isinstance(photo, BufferedInputFile) and hasattr(edited, "photo"):
+                cache_photo(photo_ref, edited)
+        elif q.message.photo:
+            await q.message.edit_caption(caption=txt, reply_markup=kb)
+        else:
+            await q.message.edit_text(txt, reply_markup=kb)
+    except TelegramBadRequest as e:
+        if "not modified" not in str(e).lower():
+            return await q.answer(f"خطا: {e}", show_alert=True)
+    except Exception as e:
+        return await q.answer(f"خطا: {e}", show_alert=True)
+    await q.answer()
+
 @dp.message(Command("endauction"))
 async def auction_end(m: Message):
     if m.from_user.id not in ADMIN_IDS:
@@ -2708,6 +2810,7 @@ async def main():
         BotCommand(command="luckydrop", description="🎉 دادن سانت به یه بازیکن رندوم (ادمین)"),
         BotCommand(command="bid", description="🔨 پیشنهاد دادن تو مزایده"),
         BotCommand(command="auctionstatus", description="📋 وضعیت مزایده‌های فعال"),
+        BotCommand(command="bidcol", description="🖼 کالکشن مزایده‌ی من (بالاترین پیشنهادها)"),
         BotCommand(command="auction", description="🔨 شروع مزایده (ادمین)"),
         BotCommand(command="endauction", description="🏁 پایان مزایده (ادمین)"),
         BotCommand(command="resetgroup", description="⚠️ پاک کردن کامل داده‌های این گروه (ادمین)"),
