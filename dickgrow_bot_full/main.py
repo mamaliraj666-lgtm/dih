@@ -180,7 +180,10 @@ HELP_SECTIONS = {
         "💳 /loan — گرفتن وام (با بهره)\n"
         "💵 /repay [مقدار] — پرداخت وام\n"
         "🧬 /tosperm [مقدار سانت] — تبدیل سانت به اسپرم (نرخ ۱ به ۲)\n"
-        "💰 /tocent [مقدار اسپرم] — تبدیل اسپرم به سانت"
+        "💰 /tocent [مقدار اسپرم] — تبدیل اسپرم به سانت\n"
+        "🎁 /box [مبلغ] — مینی‌گیم جعبه‌ی شانس: ۴ جعبه، یکی رو بردار! (💎 ×۳ | 🔄 ×۱ | 💣 ×۰)\n"
+        "🃏 /bj [مبلغ] — بلک‌جک (۲۱): کارت بگیر یا بایست؛ برد ×۲، بلک‌جک ×۲.۵، دیلر تا ۱۷ می‌گیره\n"
+        "🪜 /climb [مبلغ] — مینی‌گیم نردبان: هر پله ۷۵٪ شانس و ضریب بزرگ‌تر؛ هر وقت خواستی برداشت کن، ولی اگه بیفتی همه‌چی می‌سوزه"
     ),
     "pvp": (
         "⚔️ دوئل و رنک",
@@ -2408,7 +2411,7 @@ async def reset_group(m: Message):
         "game_loans", "mafia_battles", "mafia2_battles", "collections",
         "company_rounds", "company_options", "company_investments",
         "company_participants", "owned_companies",
-        "farm_tiles", "farm_inventory", "farm_records", "auctions",
+        "farm_tiles", "farm_inventory", "farm_records", "auctions", "climb_games", "blackjack_games",
     ):
         c.execute(f"DELETE FROM {table} WHERE chat_id=?", (chat_id,))
     # جدول‌هایی که فقط از طریق battle_id به گروه وصلن
@@ -2975,6 +2978,448 @@ async def company_dividend_loop(bot):
                 pass
 # ================== پایان کمپانی کیر ==================
 
+# ===== مینی‌گیم: جعبه‌ی شانس 🎁 =====
+# - /box [مبلغ] → ۴ تا جعبه‌ی بسته میاد؛ یکی رو انتخاب می‌کنی
+# - تو هر دور یه جعبه‌ی 💎 (۳ برابر شرط)، یه 🔄 (شرط برمی‌گرده) و دوتا 💣 (شرط می‌سوزه) هست
+# - میانگین برد = ۱ برابر شرط (نه تورم می‌سازه نه سانت می‌خوره)
+# - سانت فقط لحظه‌ی انتخاب کم/زیاد می‌شه؛ اگه بازی نیمه‌کاره بمونه هیچی از دست نمیری
+BOX_MAX_BET = 100
+BOX_PAYOUTS = [0, 0, 1, 3]
+BOX_TTL = 120
+BOX_EMOJI = {0: "💣", 1: "🔄", 3: "💎"}
+BOX_GAMES = {}  # gid -> {chat, uid, bet, ts}
+
+@dp.message(Command("box"))
+async def box_start(m: Message):
+    if m.chat.type == "private":
+        return await m.reply("❌ این بازی رو باید تو گروه بزنی.")
+    args = m.text.split()[1:]
+    if not args or not args[0].isdigit():
+        return await m.reply(f"🎁 جعبه‌ی شانس\n\nاستفاده: /box [مبلغ شرط]\n(حداکثر {BOX_MAX_BET} سانت)\n\n"
+                             "۴ تا جعبه هست: 💎 (۳ برابر) | 🔄 (شرطت برمی‌گرده) | 💣💣 (شرط می‌سوزه)")
+    bet = int(args[0])
+    uid = m.from_user.id
+    user(m.chat.id, uid, m.from_user.full_name)
+    if bet < 1 or bet > BOX_MAX_BET:
+        return await m.reply(f"❌ شرط باید بین ۱ تا {BOX_MAX_BET} سانت باشه.")
+    if get_size(m.chat.id, uid) < bet:
+        return await m.reply("❌ سانت کافی نداری.")
+    now = int(time.time())
+    for k in [k for k, g in BOX_GAMES.items() if now - g["ts"] > BOX_TTL]:
+        BOX_GAMES.pop(k, None)
+    gid = str(random.randint(100000, 999999))
+    while gid in BOX_GAMES:
+        gid = str(random.randint(100000, 999999))
+    BOX_GAMES[gid] = {"chat": m.chat.id, "uid": uid, "bet": bet, "ts": now}
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🎁", callback_data=f"box:{uid}:{gid}:{i}") for i in range(len(BOX_PAYOUTS))
+    ]])
+    await m.reply(
+        f"🎁 جعبه‌ی شانس — {m.from_user.full_name}\n"
+        f"💰 شرط: {bet} سانت\n\n"
+        f"یه جعبه انتخاب کن! ({BOX_TTL//60} دقیقه وقت داری)\n"
+        f"💎 ×۳ | 🔄 ×۱ | 💣 ×۰ (دوتا)",
+        reply_markup=kb
+    )
+
+@dp.callback_query(F.data.startswith("box:"))
+async def box_pick(q: CallbackQuery):
+    parts = q.data.split(":")
+    if len(parts) != 4:
+        return await q.answer(NAV_LEGACY_MSG, show_alert=True)
+    _, viewer_id, gid, idx = parts
+    if not await nav_guard(q, int(viewer_id)):
+        return
+    g = BOX_GAMES.pop(gid, None)  # pop = هر بازی فقط یه بار قابل انتخابه
+    if not g or g["chat"] != q.message.chat.id:
+        return await q.answer("⌛️ این بازی تموم شده یا منقضی شده.", show_alert=True)
+    uid, bet = g["uid"], g["bet"]
+    if int(time.time()) - g["ts"] > BOX_TTL:
+        await q.message.edit_text("⌛️ وقت انتخابت تموم شد؛ چیزی کم نشد. دوباره /box بزن.", reply_markup=None)
+        return await q.answer()
+    if get_size(q.message.chat.id, uid) < bet:
+        await q.message.edit_text("❌ الان سانت کافی برای این شرط نداری؛ بازی لغو شد.", reply_markup=None)
+        return await q.answer()
+    picked = int(idx)
+    boxes = BOX_PAYOUTS[:]
+    random.shuffle(boxes)
+    mult = boxes[picked]
+    delta = bet * mult - bet
+    c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (delta, q.message.chat.id, uid))
+    db.commit()
+    row = " ".join(f"[{BOX_EMOJI[b]}]" if i == picked else BOX_EMOJI[b] for i, b in enumerate(boxes))
+    if mult == 3:
+        res = f"💎 جکپات! +{delta} سانت"
+    elif mult == 1:
+        res = "🔄 شرطت برگشت، نه بردی نه باختی."
+    else:
+        res = f"💣 بوووم! {bet} سانت سوخت."
+    await q.message.edit_text(
+        f"🎁 جعبه‌ی شانس — {get_name(q.message.chat.id, uid)}\n\n{row}\n\n{res}\n"
+        f"📏 سانت فعلی: {get_size(q.message.chat.id, uid)}",
+        reply_markup=None
+    )
+    await q.answer()
+
+# ===== مینی‌گیم: نردبان 🪜 =====
+# - /climb [مبلغ] → شرط رو می‌ذاری و از پایین نردبان شروع می‌کنی
+# - هر بار «برو بالاتر» رو بزنی ۷۵٪ شانس داری یه پله بری بالا و ضریبت بزرگ‌تر بشه؛ ۲۵٪ می‌افتی و شرط می‌سوزه
+# - هر لحظه می‌تونی «برداشت» رو بزنی و پول رو برداری؛ رسیدن به پله‌ی ۶ خودکار برداشت می‌شه
+# - ضریب هر پله = (۱/۰.۷۵)^پله، پس میانگین برد ≈ ۱ برابر شرطه (اقتصاد رو خراب نمی‌کنه)
+# - شرط همون اول کم می‌شه (تا با چندتا بازی همزمان نشه تقلب کرد)؛ ذخیره تو دیتابیسه، پس با ریستارت ربات هم گم نمی‌شه
+# - اگه ۳ دقیقه هیچ حرکتی نکنی، بازی خودکار برداشت می‌شه (پله‌ی ۰ = شرط برمی‌گرده)
+CLIMB_MAX_BET = 100
+CLIMB_P = 0.75
+CLIMB_MAX_STEPS = 6
+CLIMB_TTL = 180
+
+c.execute("""CREATE TABLE IF NOT EXISTS climb_games(
+    chat_id INTEGER,
+    user_id INTEGER,
+    bet INTEGER,
+    step INTEGER DEFAULT 0,
+    ts INTEGER,
+    msg_id INTEGER DEFAULT 0,
+    PRIMARY KEY(chat_id, user_id)
+)""")
+db.commit()
+
+def climb_mult(step):
+    return (1 / CLIMB_P) ** step
+
+def climb_payout(bet, step):
+    return bet if step <= 0 else int(bet * climb_mult(step))
+
+def climb_load(chat_id, uid):
+    return c.execute("SELECT bet,step,ts,msg_id FROM climb_games WHERE chat_id=? AND user_id=?", (chat_id, uid)).fetchone()
+
+def climb_cash(chat_id, uid, bet, step):
+    payout = climb_payout(bet, step)
+    c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (payout, chat_id, uid))
+    c.execute("DELETE FROM climb_games WHERE chat_id=? AND user_id=?", (chat_id, uid))
+    db.commit()
+    return payout
+
+def climb_view(name, bet, step, viewer_id):
+    lines = []
+    for i in range(CLIMB_MAX_STEPS, 0, -1):
+        mark = "🧗" if i == step else ("✅" if i < step else "▫️")
+        lines.append(f"{mark} پله {i}: ×{climb_mult(i):.1f}")
+    if step == 0:
+        lines.append("🧗 پایین نردبان")
+    txt = (
+        f"🪜 نردبان — {name}\n"
+        f"💰 شرط: {bet} سانت\n\n"
+        + "\n".join(lines) +
+        f"\n\n🎯 شانس هر پله: {int(CLIMB_P*100)}٪"
+    )
+    rows = [[InlineKeyboardButton(text="⬆️ برو بالاتر", callback_data=f"clb:{viewer_id}:up")]]
+    if step >= 1:
+        rows.append([InlineKeyboardButton(
+            text=f"💰 برداشت ({climb_payout(bet, step)} سانت)", callback_data=f"clb:{viewer_id}:cash")])
+    return txt, InlineKeyboardMarkup(inline_keyboard=rows)
+
+@dp.message(Command("climb"))
+async def climb_start(m: Message):
+    if m.chat.type == "private":
+        return await m.reply("❌ این بازی رو باید تو گروه بزنی.")
+    args = m.text.split()[1:]
+    if not args or not args[0].isdigit():
+        return await m.reply(
+            f"🪜 نردبان\n\nاستفاده: /climb [مبلغ شرط]\n(حداکثر {CLIMB_MAX_BET} سانت)\n\n"
+            f"هر پله {int(CLIMB_P*100)}٪ شانس داره و ضریبت بزرگ‌تر می‌شه، ولی با ۲۵٪ می‌افتی و همه‌چی می‌سوزه. "
+            f"هر وقت خواستی «برداشت» رو بزن!"
+        )
+    bet = int(args[0])
+    uid, chat_id = m.from_user.id, m.chat.id
+    user(chat_id, uid, m.from_user.full_name)
+    now = int(time.time())
+    g = climb_load(chat_id, uid)
+    if g:
+        if now - g[2] > CLIMB_TTL:
+            payout = climb_cash(chat_id, uid, g[0], g[1])
+            await m.reply(f"⌛️ نردبان قبلیت منقضی شد و خودکار برداشت شد: {payout} سانت.")
+        else:
+            return await m.reply("❌ یه نردبان نیمه‌کاره داری! اول همون رو تموم کن.")
+    if bet < 1 or bet > CLIMB_MAX_BET:
+        return await m.reply(f"❌ شرط باید بین ۱ تا {CLIMB_MAX_BET} سانت باشه.")
+    if get_size(chat_id, uid) < bet:
+        return await m.reply("❌ سانت کافی نداری.")
+    c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (bet, chat_id, uid))
+    c.execute("INSERT OR REPLACE INTO climb_games(chat_id,user_id,bet,step,ts,msg_id) VALUES(?,?,?,0,?,0)", (chat_id, uid, bet, now))
+    db.commit()
+    txt, kb = climb_view(m.from_user.full_name, bet, 0, uid)
+    try:
+        sent = await m.reply(txt, reply_markup=kb)
+    except Exception:
+        climb_cash(chat_id, uid, bet, 0)  # ارسال خراب شد: شرط برگرده
+        raise
+    c.execute("UPDATE climb_games SET msg_id=? WHERE chat_id=? AND user_id=?", (sent.message_id, chat_id, uid))
+    db.commit()
+
+@dp.callback_query(F.data.startswith("clb:"))
+async def climb_press(q: CallbackQuery):
+    parts = q.data.split(":")
+    if len(parts) != 3:
+        return await q.answer(NAV_LEGACY_MSG, show_alert=True)
+    _, viewer_id, action = parts
+    viewer_id = int(viewer_id)
+    if not await nav_guard(q, viewer_id):
+        return
+    chat_id = q.message.chat.id
+    g = climb_load(chat_id, viewer_id)
+    if not g or g[3] != q.message.message_id:
+        return await q.answer("⌛️ این بازی تموم شده.", show_alert=True)
+    bet, step, ts, _mid = g
+    name = get_name(chat_id, viewer_id)
+    if int(time.time()) - ts > CLIMB_TTL:
+        payout = climb_cash(chat_id, viewer_id, bet, step)
+        await q.message.edit_text(
+            f"⌛️ نردبان — {name}\n\nوقتت تموم شد و خودکار برداشت شد: {payout} سانت\n📏 سانت فعلی: {get_size(chat_id, viewer_id)}",
+            reply_markup=None)
+        return await q.answer()
+    if action == "cash":
+        if step < 1:
+            return await q.answer("اول یه پله برو بالا!", show_alert=True)
+        payout = climb_cash(chat_id, viewer_id, bet, step)
+        await q.message.edit_text(
+            f"🪜 نردبان — {name}\n\n💰 برداشت کردی! {payout} سانت (پله‌ی {step}، ×{climb_mult(step):.1f})\n"
+            f"{'📈 سود' if payout > bet else '📉 تغییر'}: {payout - bet:+d} سانت\n"
+            f"📏 سانت فعلی: {get_size(chat_id, viewer_id)}",
+            reply_markup=None)
+        return await q.answer()
+    if action != "up":
+        return await q.answer()
+    if random.random() < CLIMB_P:
+        step += 1
+        if step >= CLIMB_MAX_STEPS:
+            payout = climb_cash(chat_id, viewer_id, bet, step)
+            await q.message.edit_text(
+                f"🪜 نردبان — {name}\n\n🏆 به قله رسیدی! (×{climb_mult(step):.1f})\n"
+                f"💰 {payout} سانت برداشت شد ({payout - bet:+d})\n"
+                f"📏 سانت فعلی: {get_size(chat_id, viewer_id)}",
+                reply_markup=None)
+            return await q.answer("🏆 قله!")
+        c.execute("UPDATE climb_games SET step=?, ts=? WHERE chat_id=? AND user_id=?", (step, int(time.time()), chat_id, viewer_id))
+        db.commit()
+        txt, kb = climb_view(name, bet, step, viewer_id)
+        await q.message.edit_text(txt, reply_markup=kb)
+        return await q.answer(f"⬆️ پله‌ی {step}!")
+    c.execute("DELETE FROM climb_games WHERE chat_id=? AND user_id=?", (chat_id, viewer_id))
+    db.commit()
+    await q.message.edit_text(
+        f"🪜 نردبان — {name}\n\n💥 از پله‌ی {step + 1} افتادی! {bet} سانت سوخت.\n"
+        f"📏 سانت فعلی: {get_size(chat_id, viewer_id)}",
+        reply_markup=None)
+    await q.answer("💥 افتادی!")
+
+# ===== بازی کارتی: بلک‌جک (۲۱) 🃏 =====
+# - /bj [مبلغ] → دو کارت می‌گیری، دیلر هم دو کارت (یکیش مخفی)
+# - «🃏 کارت بگیر» یا «✋ بایست»؛ نزدیک‌تر به ۲۱ برنده‌ست، بیشتر از ۲۱ = باخت
+# - دیلر تا ۱۷ کارت می‌گیره و رو ۱۷ می‌ایسته
+# - برد = ۲ برابر شرط | بلک‌جک (A + ده‌تایی تو دو کارت اول) = ۲.۵ برابر | مساوی = شرط برمی‌گرده
+# - شرط همون اول کم می‌شه و بازی تو دیتابیسه (با ریستارت ربات گم نمی‌شه)؛ ۳ دقیقه بی‌حرکتی = خودکار «بایست»
+# - ساده‌ست: دابل و اسپلیت نداره
+BJ_MAX_BET = 100
+BJ_TTL = 180
+BJ_RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+BJ_SUITS = ["♠", "♥", "♦", "♣"]
+
+c.execute("""CREATE TABLE IF NOT EXISTS blackjack_games(
+    chat_id INTEGER,
+    user_id INTEGER,
+    bet INTEGER,
+    player TEXT,
+    dealer TEXT,
+    deck TEXT,
+    ts INTEGER,
+    msg_id INTEGER DEFAULT 0,
+    PRIMARY KEY(chat_id, user_id)
+)""")
+db.commit()
+
+def bj_new_deck():
+    deck = [r + s_ for r in BJ_RANKS for s_ in BJ_SUITS]
+    random.shuffle(deck)
+    return deck
+
+def bj_val(hand):
+    total, aces = 0, 0
+    for card in hand:
+        r = card[:-1]
+        if r == "A":
+            total += 11
+            aces += 1
+        elif r in ("J", "Q", "K"):
+            total += 10
+        else:
+            total += int(r)
+    while total > 21 and aces:
+        total -= 10
+        aces -= 1
+    return total
+
+def bj_is_blackjack(hand):
+    return len(hand) == 2 and bj_val(hand) == 21
+
+def bj_load(chat_id, uid):
+    row = c.execute(
+        "SELECT bet,player,dealer,deck,ts,msg_id FROM blackjack_games WHERE chat_id=? AND user_id=?",
+        (chat_id, uid)
+    ).fetchone()
+    if not row:
+        return None
+    bet, player, dealer, deck, ts, msg_id = row
+    return {"bet": bet, "player": player.split(","), "dealer": dealer.split(","),
+            "deck": deck.split(",") if deck else [], "ts": ts, "msg_id": msg_id}
+
+def bj_save(chat_id, uid, g):
+    c.execute(
+        "UPDATE blackjack_games SET player=?, dealer=?, deck=?, ts=? WHERE chat_id=? AND user_id=?",
+        (",".join(g["player"]), ",".join(g["dealer"]), ",".join(g["deck"]), int(time.time()), chat_id, uid)
+    )
+    db.commit()
+
+def bj_settle(chat_id, uid, payout):
+    """پول برنده رو بده و بازی رو پاک کن."""
+    if payout:
+        c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (payout, chat_id, uid))
+    c.execute("DELETE FROM blackjack_games WHERE chat_id=? AND user_id=?", (chat_id, uid))
+    db.commit()
+
+def bj_render(name, g, reveal, note=""):
+    pv = bj_val(g["player"])
+    if reveal:
+        dealer_txt = f"{' '.join(g['dealer'])} ({bj_val(g['dealer'])})"
+    else:
+        dealer_txt = f"{g['dealer'][0]} 🂠"
+    txt = (
+        f"🃏 بلک‌جک — {name}\n"
+        f"💰 شرط: {g['bet']} سانت\n\n"
+        f"🧑 دست تو: {' '.join(g['player'])} ({pv})\n"
+        f"🎩 دست دیلر: {dealer_txt}"
+    )
+    if note:
+        txt += f"\n\n{note}"
+    return txt
+
+def bj_kb(viewer_id):
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🃏 کارت بگیر", callback_data=f"bjk:{viewer_id}:hit"),
+        InlineKeyboardButton(text="✋ بایست", callback_data=f"bjk:{viewer_id}:stand"),
+    ]])
+
+def bj_finish(chat_id, uid, g, name):
+    """دیلر بازی می‌کنه، نتیجه حساب و پرداخت می‌شه. خروجی: متن نهایی."""
+    bet = g["bet"]
+    pv = bj_val(g["player"])
+    while bj_val(g["dealer"]) < 17:
+        g["dealer"].append(g["deck"].pop())
+    dv = bj_val(g["dealer"])
+    if dv > 21:
+        payout, note = bet * 2, f"🏆 دیلر بیشتر از ۲۱ شد! بردی: +{bet} سانت"
+    elif pv > dv:
+        payout, note = bet * 2, f"🏆 بردی! +{bet} سانت"
+    elif pv == dv:
+        payout, note = bet, "🤝 مساوی — شرطت برگشت."
+    else:
+        payout, note = 0, f"💥 باختی! {bet} سانت سوخت."
+    bj_settle(chat_id, uid, payout)
+    return bj_render(name, g, True, note + f"\n📏 سانت فعلی: {get_size(chat_id, uid)}")
+
+@dp.message(Command("bj", "blackjack"))
+async def bj_start(m: Message):
+    if m.chat.type == "private":
+        return await m.reply("❌ این بازی رو باید تو گروه بزنی.")
+    args = m.text.split()[1:]
+    if not args or not args[0].isdigit():
+        return await m.reply(
+            f"🃏 بلک‌جک (۲۱)\n\nاستفاده: /bj [مبلغ شرط]\n(حداکثر {BJ_MAX_BET} سانت)\n\n"
+            "به ۲۱ نزدیک شو ولی ردش نکن! دیلر تا ۱۷ کارت می‌گیره.\n"
+            "برد ×۲ | بلک‌جک ×۲.۵ | مساوی = شرطت برمی‌گرده"
+        )
+    bet = int(args[0])
+    uid, chat_id = m.from_user.id, m.chat.id
+    name = m.from_user.full_name
+    user(chat_id, uid, name)
+    g = bj_load(chat_id, uid)
+    if g:
+        if int(time.time()) - g["ts"] > BJ_TTL:
+            res = bj_finish(chat_id, uid, g, name)
+            await m.reply("⌛️ بازی قبلیت منقضی شد و خودکار «بایست» زده شد:\n\n" + res)
+        else:
+            return await m.reply("❌ یه دست نیمه‌کاره داری! اول همون رو تموم کن.")
+    if bet < 1 or bet > BJ_MAX_BET:
+        return await m.reply(f"❌ شرط باید بین ۱ تا {BJ_MAX_BET} سانت باشه.")
+    if get_size(chat_id, uid) < bet:
+        return await m.reply("❌ سانت کافی نداری.")
+    deck = bj_new_deck()
+    player = [deck.pop(), deck.pop()]
+    dealer = [deck.pop(), deck.pop()]
+    c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (bet, chat_id, uid))
+    c.execute(
+        "INSERT OR REPLACE INTO blackjack_games(chat_id,user_id,bet,player,dealer,deck,ts,msg_id) VALUES(?,?,?,?,?,?,?,0)",
+        (chat_id, uid, bet, ",".join(player), ",".join(dealer), ",".join(deck), int(time.time()))
+    )
+    db.commit()
+    g = {"bet": bet, "player": player, "dealer": dealer, "deck": deck}
+    # بلک‌جک طبیعی (یا دیلر)، همون اول تموم می‌شه
+    if bj_is_blackjack(player) or bj_is_blackjack(dealer):
+        if bj_is_blackjack(player) and bj_is_blackjack(dealer):
+            payout, note = bet, "🤝 هر دو بلک‌جک — شرطت برگشت."
+        elif bj_is_blackjack(player):
+            payout = int(bet * 2.5)
+            note = f"🂡 بلک‌جک! +{payout - bet} سانت"
+        else:
+            payout, note = 0, f"💥 دیلر بلک‌جک زد! {bet} سانت سوخت."
+        bj_settle(chat_id, uid, payout)
+        return await m.reply(bj_render(name, g, True, note + f"\n📏 سانت فعلی: {get_size(chat_id, uid)}"))
+    try:
+        sent = await m.reply(bj_render(name, g, False), reply_markup=bj_kb(uid))
+    except Exception:
+        bj_settle(chat_id, uid, bet)  # ارسال خراب شد: شرط برگرده
+        raise
+    c.execute("UPDATE blackjack_games SET msg_id=? WHERE chat_id=? AND user_id=?", (sent.message_id, chat_id, uid))
+    db.commit()
+
+@dp.callback_query(F.data.startswith("bjk:"))
+async def bj_press(q: CallbackQuery):
+    parts = q.data.split(":")
+    if len(parts) != 3:
+        return await q.answer(NAV_LEGACY_MSG, show_alert=True)
+    _, viewer_id, action = parts
+    viewer_id = int(viewer_id)
+    if not await nav_guard(q, viewer_id):
+        return
+    chat_id = q.message.chat.id
+    g = bj_load(chat_id, viewer_id)
+    if not g or g["msg_id"] != q.message.message_id:
+        return await q.answer("⌛️ این دست تموم شده.", show_alert=True)
+    name = get_name(chat_id, viewer_id)
+    if int(time.time()) - g["ts"] > BJ_TTL:
+        res = bj_finish(chat_id, viewer_id, g, name)
+        await q.message.edit_text("⌛️ وقتت تموم شد؛ خودکار «بایست» زده شد.\n\n" + res, reply_markup=None)
+        return await q.answer()
+    if action == "hit":
+        g["player"].append(g["deck"].pop())
+        pv = bj_val(g["player"])
+        if pv > 21:
+            bj_settle(chat_id, viewer_id, 0)
+            await q.message.edit_text(
+                bj_render(name, g, True, f"💥 بیشتر از ۲۱ شد! {g['bet']} سانت سوخت.\n📏 سانت فعلی: {get_size(chat_id, viewer_id)}"),
+                reply_markup=None)
+            return await q.answer("💥 باختی!")
+        if pv == 21:
+            await q.message.edit_text(bj_finish(chat_id, viewer_id, g, name), reply_markup=None)
+            return await q.answer("۲۱!")
+        bj_save(chat_id, viewer_id, g)
+        await q.message.edit_text(bj_render(name, g, False), reply_markup=bj_kb(viewer_id))
+        return await q.answer()
+    if action == "stand":
+        await q.message.edit_text(bj_finish(chat_id, viewer_id, g, name), reply_markup=None)
+        return await q.answer()
+    await q.answer()
+
 async def main():
     bot=Bot(TOKEN)
     from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeDefault
@@ -2990,6 +3435,9 @@ async def main():
         BotCommand(command="tosperm", description="🧬 تبدیل سانت به اسپرم"),
         BotCommand(command="tocent", description="💰 تبدیل اسپرم به سانت"),
         BotCommand(command="top", description="🏆 جدول بزرگان"),
+        BotCommand(command="box", description="🎁 مینی‌گیم جعبه‌ی شانس"),
+        BotCommand(command="climb", description="🪜 مینی‌گیم نردبان"),
+        BotCommand(command="bj", description="🃏 بلک‌جک (۲۱)"),
         BotCommand(command="market", description="🛒 بازار سلبریتی"),
         BotCommand(command="collection", description="📚 کالکشن من"),
         BotCommand(command="spin", description="🎰 اسپین سلبریتی"),
