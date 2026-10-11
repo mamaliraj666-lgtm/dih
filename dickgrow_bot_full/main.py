@@ -164,18 +164,37 @@ def get_name(chat_id,uid):
 
 # ===== توکن بازی 🎟 =====
 # - هر دست مینی‌گیم (/box ، /climb ، /bj) ۱ توکن ورودی می‌خواد (جدا از شرط)
-# - قیمت هر توکن = ۵٪ سایز لحظه‌ی خرید (حداقل ۱ سانت)؛ تو یه خرید قیمت ثابته
+# - قیمت هر توکن = ۵٪ سایز لحظه‌ی خرید (گرد‌شده به نزدیک‌ترین عدد، حداقل ۱ سانت)؛ تو یه خرید قیمت ثابته
 # - برنده‌ی دوئل (/pvp) با شانس بالا یه توکن هم می‌گیره
 TOKEN_PRICE_PCT = 0.05
 TOKEN_MAX_BUY = 20
 DUEL_TOKEN_CHANCE = 0.7
+
+# ===== مالیات 🏛 =====
+# - مالیات کاشت: از صفحه‌ی ۴ پنل مزرعه به بعد (هر صفحه ۹ زمین) هر بار کاشتن ۱۰۰ سانت
+# - مالیات ثروت: هر ۲۴ ساعت ۵٪ سایز پولدارترین فرد هر گروه
+# - هر دو مالیات بین ۳ تا از فعال‌ترین بازیکنای گروه (به‌جز پرداخت‌کننده) پخش می‌شن؛ اگه فعالی نباشه می‌سوزن
+FARM_TAX_FROM_PAGE = 4
+TAX_RECIPIENTS = 3
+ACTIVITY_WINDOW_DAYS = 7
+# راه فرار مالیاتی 🕵️: هر کی تو ۲۴ ساعت اخیر ۱۵ دوئل + ۱۰ مینی‌گیم (/box ، /climb ، /bj) انجام داده باشه از هر دو مالیات معافه
+TAX_EVASION_DUELS = 15
+TAX_EVASION_GAMES = 10
+TAX_EVASION_WINDOW = 24 * 3600
+FARM_PLANT_TAX = 100
+WEALTH_TAX_PCT = 0.05
+WEALTH_TAX_INTERVAL = 24 * 3600
+
+def plot_has_tax(plot_index):
+    """plot_index از ۰ شروع می‌شه؛ هر صفحه‌ی پنل FARM_PAGE_SIZE تا زمین داره."""
+    return plot_index // FARM_PAGE_SIZE + 1 >= FARM_TAX_FROM_PAGE
 
 def get_tokens(chat_id, uid):
     row = c.execute("SELECT tokens FROM users WHERE chat_id=? AND user_id=?", (chat_id, uid)).fetchone()
     return (row[0] or 0) if row else 0
 
 def token_price(size_cm):
-    return max(1, int(size_cm * TOKEN_PRICE_PCT))
+    return max(1, int(size_cm * TOKEN_PRICE_PCT + 0.5))
 
 def add_tokens(chat_id, uid, n=1):
     c.execute("UPDATE users SET tokens=COALESCE(tokens,0)+? WHERE chat_id=? AND user_id=?", (n, chat_id, uid))
@@ -225,7 +244,9 @@ HELP_SECTIONS = {
         "🧬 /tosperm [مقدار سانت] — تبدیل سانت به اسپرم (نرخ ۱ به ۲)\n"
         "💰 /tocent [مقدار اسپرم] — تبدیل اسپرم به سانت\n"
         "🎟 /token — دیدن توکن‌ها و قیمت فعلی هر توکن\n"
-        f"🛒 /buytoken [تعداد] — خرید توکن بازی (هر توکن = {int(TOKEN_PRICE_PCT*100)}٪ سایزت)\n\n"
+        f"🛒 /buytoken [تعداد] — خرید توکن بازی (هر توکن = {int(TOKEN_PRICE_PCT*100)}٪ سایزت)\n"
+        f"🏛 /tax — مالیات: هر {WEALTH_TAX_INTERVAL//3600} ساعت {int(WEALTH_TAX_PCT*100)}٪ سایز پولدارترین فرد گروه کم می‌شه و بین {TAX_RECIPIENTS} فعال‌ترین بازیکن (بیشترین پیام تو {ACTIVITY_WINDOW_DAYS} روز اخیر) پخش می‌شه؛ این‌جا می‌بینی کی پولدارترینه و فعال‌ترین‌ها کی‌ان\n"
+        f"🕵️ فرار مالیاتی: اگه تو {TAX_EVASION_WINDOW//3600} ساعت اخیر {TAX_EVASION_DUELS} دوئل (/pvp) و {TAX_EVASION_GAMES} مینی‌گیم (/box ، /climb ، /bj) انجام داده باشی از هر دو مالیات معافی (پیشرفتت تو /tax)\n\n"
         "🎮 بازی‌های سریع (جعبه، نردبان، بلک‌جک) تو بخش «مینی‌گیم‌ها» هستن و برای هر دست توکن می‌خوان."
     ),
     "games": (
@@ -325,6 +346,7 @@ HELP_SECTIONS = {
         "✅ آماده‌ی برداشت → بزن روش تا اسپرم بگیری\n"
         "💀 فاسدشده → اگه دیر بجنبی نصف ارزشش رو می‌گیری\n\n"
         "از همون پنل می‌تونی زمین جدید باز کنی، یه تخم تکی شانسی بخری (۷ سانت)، یا یه پک ۳تایی بخری (۴۰ سانت). رنگ‌های ارزون (⚪🟢) شانس دارن موقع برداشت یه تخم دیگه از خودشون بندازن؛ بقیه (🔷🔵🟪🟣🟡) هیچ‌وقت تکرار نمی‌شن ولی سودشون بیشتره — هرچی کمیاب‌تر، دیرتر می‌رسه ولی سودش نامتناسب بیشتره.\n\n"
+        f"💰 مالیات کاشت: از صفحه‌ی {FARM_TAX_FROM_PAGE} پنل به بعد (زمین‌های با علامت ➕💰) هر بار کاشتن {FARM_PLANT_TAX} سانت مالیات داره؛ جدا از قیمت تخمه از سانتت کم می‌شه و بین {TAX_RECIPIENTS} فعال‌ترین بازیکن گروه پخش می‌شه. سانت کافی نداشته باشی نمی‌تونی بکاری. (با فرار مالیاتی — {TAX_EVASION_DUELS} دوئل و {TAX_EVASION_GAMES} بازی تو {TAX_EVASION_WINDOW//3600} ساعت — از این مالیات هم معاف می‌شی.)\n\n"
         "🌾 /farmrank — رنک مزرعه‌ی خودت، بر اساس دقیقاً چیزی که الان تو زمین‌ها و انبارته\n"
         "📊 /farmleader — جدول رنک مزرعه‌ی کل گروه"
     ),
@@ -335,6 +357,8 @@ HELP_SECTIONS = {
         "🗂 /aucol — کالکشن همه‌ی مزایده‌های فعال با عکس، بالاترین پیشنهاد، حداقل پیشنهاد بعدی و زمان باقی‌مونده\n"
         "🖼 /bidcol — کالکشن مزایده‌ی تو: سلبریتی‌هایی که الان بالاترین پیشنهاد روشونه (با عکس) + مجموعشون و سانتی که بعد خرید همه می‌مونه (ریپلای کنی مال یکی دیگه رو می‌بینی)\n"
         "❌ /cancelbid [شماره] — لغو بالاترین پیشنهادت (کل سانتش برمی‌گرده و مزایده بدون پیشنهاد می‌مونه؛ دکمه‌ی لغو تو /bidcol هم همینو انجام میده)\n\n"
+        "🔨 تیر مزایده: هر سلبریتی که تو مزایده ببری خودکار با عکسش میره تو /collection (تیر «🔨 مزایده»)؛ ارزشش همون مبلغیه که برنده شدی ولی قابل فروش نیست (/sell برای این تیر کار نمی‌کنه). اگه قبلاً داشته باشیش مبلغ برمی‌گرده.\n"
+        "👑 ادمین: /addau [file_id] [اسم] ثبت سلبریتی تو تیر مزایده | /aulist لیستش | /auction [اسم] شروع مزایده‌ش\n\n"
         "🔒 دکمه‌های ◀️ ▶️ کالکشن‌ها فقط برای کسیه که دستور رو زده؛ هرکی بخواد کالکشن خودش رو ببینه باید دستورش رو بزنه.\n\n"
         "سانت پیشنهادت همون لحظه بلوکه می‌شه و اگه کسی بالاتر بده برمی‌گرده. هر پیشنهاد جدید تایمر ۱۲ ساعته‌ی همون مزایده رو از اول می‌کنه؛ هرکس ۱۲ ساعت بدون پیشنهاد بالاتر بمونه برنده‌ست.\n\n"
         "ادمین:\n"
@@ -541,7 +565,7 @@ def build_farm_keyboard(chat_id, uid, page):
             label = {"growing": f"{emoji}⏳", "ready": f"✅{emoji}", "spoiled": f"💀{emoji}"}[state]
             row.append(InlineKeyboardButton(text=label, callback_data=f"farm:tile:{page}:{i}"))
         else:
-            row.append(InlineKeyboardButton(text="➕", callback_data=f"farm:tile:{page}:{i}"))
+            row.append(InlineKeyboardButton(text="➕💰" if plot_has_tax(i) else "➕", callback_data=f"farm:tile:{page}:{i}"))
         if len(row) == 3:
             rows.append(row)
             row = []
@@ -562,7 +586,10 @@ def build_farm_keyboard(chat_id, uid, page):
 def build_farm_text(chat_id, uid):
     inv = get_inventory(chat_id, uid)
     inv_txt = "، ".join(f"{EGGS[t]['emoji']}×{n}" for t, n in inv.items()) if inv else "خالیه"
-    return f"🌾 مزرعه‌ی اسپرم\n\n📦 انبار تخم: {inv_txt}\n\n➕ زمین خالی | ⏳ در حال رشد | ✅ آماده‌ی برداشت | 💀 فاسدشده (نصف ارزش)"
+    return (
+        f"🌾 مزرعه‌ی اسپرم\n\n📦 انبار تخم: {inv_txt}\n\n➕ زمین خالی | ⏳ در حال رشد | ✅ آماده‌ی برداشت | 💀 فاسدشده (نصف ارزش)\n\n"
+        f"💰 کاشتن از صفحه‌ی {FARM_TAX_FROM_PAGE} به بعد (➕💰) هر بار {FARM_PLANT_TAX} سانت مالیات داره (بین {TAX_RECIPIENTS} فعال‌ترین بازیکن پخش می‌شه)"
+    )
 
 @dp.message(Command("farm"))
 async def farm_cmd(m: Message):
@@ -670,7 +697,8 @@ async def farm_tile(q: CallbackQuery):
         [InlineKeyboardButton(text=f"{EGGS[t]['emoji']} {EGGS[t]['name']} ({n} تا)", callback_data=f"farm:plant:{page}:{num}:{t}")]
         for t, n in inv.items()
     ] + [[InlineKeyboardButton(text="⬅️ برگشت", callback_data=f"farm:page:{page}")]])
-    await q.message.edit_text(f"🌱 کدوم تخم رو تو این زمین بکاری؟", reply_markup=kb)
+    tax_note = f"\n\n💰 کاشتن تو این زمین {FARM_PLANT_TAX} سانت مالیات داره (از صفحه‌ی {FARM_TAX_FROM_PAGE} به بعد)" if plot_has_tax(num) else ""
+    await q.message.edit_text(f"🌱 کدوم تخم رو تو این زمین بکاری؟{tax_note}", reply_markup=kb)
     await q.answer()
 
 @dp.callback_query(F.data.startswith("farm:plant:"))
@@ -681,11 +709,26 @@ async def farm_plant(q: CallbackQuery):
     row = c.execute("SELECT count FROM farm_inventory WHERE chat_id=? AND user_id=? AND egg_type=?", (chat_id, uid, egg_type)).fetchone()
     if not row or row[0] <= 0:
         return await q.answer("❌ دیگه از این نداری!", show_alert=True)
+    tax = FARM_PLANT_TAX if plot_has_tax(num) else 0
+    evaded = False
+    if tax and tax_exempt(chat_id, uid)[0]:
+        tax, evaded = 0, True
+    if tax and get_size(chat_id, uid) < tax:
+        return await q.answer(f"💸 کاشتن تو این زمین {tax} سانت مالیات داره و سانت کافی نداری!", show_alert=True)
     c.execute("UPDATE farm_inventory SET count=count-1 WHERE chat_id=? AND user_id=? AND egg_type=?", (chat_id, uid, egg_type))
     c.execute("INSERT INTO farm_tiles(chat_id,user_id,plot_num,egg_type,planted_at) VALUES(?,?,?,?,?)", (chat_id, uid, num, egg_type, int(time.time())))
-    bump_farm_record(chat_id, uid, eggs_planted=1)
+    paid_to = []
+    if tax:
+        c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (tax, chat_id, uid))
+        paid_to = distribute_tax(chat_id, uid, tax)
+    bump_farm_record(chat_id, uid, eggs_planted=1, spent_cm=tax)
     db.commit()
-    await q.answer(f"🌱 {EGGS[egg_type]['name']} کاشته شد!")
+    tax_msg = ""
+    if tax:
+        tax_msg = f"\n💰 {tax} سانت مالیات کاشت رفت" + (" و بین فعال‌ترین‌ها پخش شد." if paid_to else " (فعالی نبود، سوخت).")
+    if evaded:
+        tax_msg = "\n🕵️ فرار مالیاتی! از مالیات کاشت معاف شدی."
+    await q.answer(f"🌱 {EGGS[egg_type]['name']} کاشته شد!" + tax_msg)
     await q.message.edit_text(build_farm_text(chat_id, uid), reply_markup=build_farm_keyboard(chat_id, uid, page))
 
 # ===== رنک مزرعه بر اساس وضعیت فعلی پنل =====
@@ -1002,6 +1045,8 @@ async def accept(q:CallbackQuery):
     winner = creator if random.random() < p_creator else opponent
     loser = opponent if winner == creator else creator
     bump_pvp_stats(chat_id, winner, loser)
+    log_play(chat_id, winner, "duel")
+    log_play(chat_id, loser, "duel")
     record_rank_duel(chat_id, winner, loser)
     c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?",(bet,chat_id,winner))
     c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?",(bet,chat_id,loser))
@@ -1395,6 +1440,45 @@ TIER_LABELS = {
 }
 TIER_PRICES = {"S": (543, 438), "A": (350, 262), "B": (175, 88), "PH": (630, 525)}
 
+# ===== تیر مزایده (AU) 🔨 =====
+# - سلبریتی‌های این تیر فقط از مزایده به‌دست میان (تو /market و /spin و /buy نیستن)
+# - هر کی تو مزایده برنده شه، سلبریتی با عکسش میره تو /collection با تیر «🔨 مزایده»
+#   (اگه اسم مزایده تو کاتالوگ نباشه، خودکار با عکس مزایده تو همین تیر ثبت می‌شه)
+# - ارزش اون سلبریتی تو کالکشن = مبلغی که برنده‌ش شدی؛ ولی /sell برای این تیر بسته‌ست
+# - کاتالوگ تو دیتابیسه، پس با ریستارت ربات از بین نمی‌ره (ادمین با /addau اضافه می‌کنه)
+TIER_CELEBS["AU"] = []
+TIER_LABELS["AU"] = "🔨 Tier مزایده"
+TIER_SHORT = {"S": "🥇 S", "A": "🥈 A", "B": "🥉 B", "PH": "💎 PH", "AU": "🔨 مزایده"}
+
+c.execute("""CREATE TABLE IF NOT EXISTS auction_celebs(
+    name TEXT PRIMARY KEY,
+    photo TEXT,
+    added_by INTEGER DEFAULT 0,
+    created_at INTEGER DEFAULT 0
+)""")
+db.commit()
+
+def register_au_celeb(name, photo, added_by=0, persist=True):
+    CELEBS[name] = ("AU", 0, 0, photo)
+    TIER_CELEBS["AU"] = [(n, v[1], v[3]) for n, v in CELEBS.items() if v[0] == "AU"]
+    if persist:
+        c.execute(
+            "INSERT OR REPLACE INTO auction_celebs(name,photo,added_by,created_at) VALUES(?,?,?,?)",
+            (name, photo, added_by, int(time.time()))
+        )
+        db.commit()
+
+def celeb_paid_value(chat_id, uid, name):
+    row = c.execute(
+        "SELECT paid_price FROM collections WHERE chat_id=? AND user_id=? AND celeb=?",
+        (chat_id, uid, name)
+    ).fetchone()
+    return row[0] if row else 0
+
+for _n, _p in c.execute("SELECT name, photo FROM auction_celebs").fetchall():
+    if _n not in CELEBS or CELEBS[_n][0] == "AU":
+        register_au_celeb(_n, _p, persist=False)
+
 def build_market_caption(tier, page):
     celebs = TIER_CELEBS[tier]
     name, price, photo = celebs[page]
@@ -1538,13 +1622,16 @@ async def collection(m:Message):
 async def send_collection_page(chat_id, owner_id, celebs, page, bot, viewer_id=None):
     name = celebs[page]
     tier, price, spin, photo_url = CELEBS[name]
-    tier_label = {"S": "🥇 S", "A": "🥈 A", "B": "🥉 B", "PH": "💎 PH"}[tier]
+    tier_label = TIER_SHORT.get(tier, tier)
+    if tier == "AU":
+        price = celeb_paid_value(chat_id, owner_id, name)
+    sell_line = "" if tier == "AU" else f"🛒 /sell {name}\n"
     txt = (
         f"📚 کالکشن — {page+1}/{len(celebs)}\n\n"
         f"👑 {name}\n"
         f"🏅 تیر: {tier_label}\n"
         f"💰 ارزش: {price} سانت\n\n"
-        f"🛒 /sell {name}\n"
+        f"{sell_line}"
         f"🏪 /list {name} [قیمت]"
     )
     buttons = []
@@ -1581,13 +1668,16 @@ async def collection_nav(q: CallbackQuery):
         page = len(celebs) - 1
     name = celebs[page]
     tier, price, spin, photo_url = CELEBS[name]
-    tier_label = {"S": "🥇 S", "A": "🥈 A", "B": "🥉 B", "PH": "💎 PH"}[tier]
+    tier_label = TIER_SHORT.get(tier, tier)
+    if tier == "AU":
+        price = celeb_paid_value(chat_id, owner_id, name)
+    sell_line = "" if tier == "AU" else f"🛒 /sell {name}\n"
     txt = (
         f"📚 کالکشن — {page+1}/{len(celebs)}\n\n"
         f"👑 {name}\n"
         f"🏅 تیر: {tier_label}\n"
         f"💰 ارزش: {price} سانت\n\n"
-        f"🛒 /sell {name}\n"
+        f"{sell_line}"
         f"🏪 /list {name} [قیمت]"
     )
     buttons = []
@@ -1623,6 +1713,8 @@ async def buy(m:Message):
         return await m.reply("❌ سلبریتی پیدا نشد.")
 
     tier,price,spin,photo=CELEBS[name]
+    if tier == "AU":
+        return await m.reply("🔨 این سلبریتی مال تیر مزایده‌ست و فقط با برنده شدن تو مزایده به‌دست میاد!")
 
     user(m.chat.id,m.from_user.id,m.from_user.full_name)
 
@@ -1844,6 +1936,8 @@ async def sell(m:Message):
     name=strip_command(m.text)
     if name not in CELEBS:
         return await m.reply("❌ سلبریتی پیدا نشد.")
+    if CELEBS[name][0] == "AU":
+        return await m.reply("🔨 سلبریتی‌های تیر مزایده قابل فروش نیستن! این سلبریتی برای همیشه تو کالکشنته.")
     user(m.chat.id,m.from_user.id,m.from_user.full_name)
     owned=c.execute(
         "SELECT paid_price FROM collections WHERE chat_id=? AND user_id=? AND celeb=?",
@@ -1997,17 +2091,25 @@ def resolve_auction(m, token=None):
     return None, f"📊 چندتا مزایده همزمان فعاله، مشخص کن کدوم:\n{listing}\n\n(شماره‌ش رو بنویس یا روی عکس همون مزایده ریپلای کن)"
 
 async def finalize_auction(bot, auction_id, cancel=False):
-    row = c.execute("SELECT chat_id,name,top_bid,top_bidder,top_bidder_name,status FROM auctions WHERE id=?", (auction_id,)).fetchone()
+    row = c.execute("SELECT chat_id,name,top_bid,top_bidder,top_bidder_name,status,photo FROM auctions WHERE id=?", (auction_id,)).fetchone()
     if not row or row[5] != 'active':
         return False
-    chat_id, name, top_bid, top_bidder, top_bidder_name, _ = row
+    chat_id, name, top_bid, top_bidder, top_bidder_name, _, a_photo = row
     c.execute("UPDATE auctions SET status=? WHERE id=?", ('cancelled' if cancel else 'ended', auction_id))
     if cancel and top_bidder:
         c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (top_bid, chat_id, top_bidder))
     delivered = False
-    if not cancel and top_bidder and name in CELEBS:
-        c.execute("INSERT INTO collections(chat_id,user_id,celeb,paid_price) VALUES(?,?,?,?)", (chat_id, top_bidder, name, top_bid))
-        delivered = True
+    dup_refund = False
+    if not cancel and top_bidder:
+        if name not in CELEBS:
+            register_au_celeb(name, a_photo)  # تیر مزایده: خودکار با عکس مزایده ثبت می‌شه
+        already = c.execute("SELECT 1 FROM collections WHERE chat_id=? AND user_id=? AND celeb=?", (chat_id, top_bidder, name)).fetchone()
+        if already:
+            c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (top_bid, chat_id, top_bidder))
+            dup_refund = True
+        else:
+            c.execute("INSERT INTO collections(chat_id,user_id,celeb,paid_price) VALUES(?,?,?,?)", (chat_id, top_bidder, name, top_bid))
+            delivered = True
     db.commit()
     if cancel:
         txt = f"🔨 مزایده‌ی #{auction_id} («{name}») لغو شد."
@@ -2023,7 +2125,10 @@ async def finalize_auction(bot, auction_id, cancel=False):
             f"💰 مبلغ نهایی: {top_bid} سانت"
         )
         if delivered:
-            txt += "\n\n✅ به کلکسیون برنده اضافه شد!"
+            tier_note = " (تیر 🔨 مزایده)" if CELEBS.get(name, ("",))[0] == "AU" else ""
+            txt += f"\n\n✅ به کلکسیون برنده اضافه شد!{tier_note}"
+        elif dup_refund:
+            txt += f"\n\n↩️ این سلبریتی از قبل تو کلکسیون برنده بود، پس {top_bid} سانت بهش برگشت."
     try:
         await bot.send_message(chat_id, txt)
     except Exception:
@@ -2044,12 +2149,11 @@ async def auction_loop(bot):
         except Exception:
             logger.exception("auction_loop error")
 
-@dp.message(Command("auction"))
-async def auction_start(m: Message):
+# ===== افزودن سلبریتی به تیر مزایده =====
+@dp.message(Command("addau"))
+async def add_au_celeb(m: Message):
     if m.from_user.id not in ADMIN_IDS:
         return await m.reply("❌ دسترسی ندارید!")
-    if m.chat.type == "private":
-        return await m.reply("❌ این دستور رو باید تو گروه بزنی.")
     raw = m.text.split(maxsplit=1)
     args = raw[1].strip() if len(raw) > 1 else ""
     photo = name = None
@@ -2062,8 +2166,57 @@ async def auction_start(m: Message):
             photo, name = parts[0], parts[1].strip()
     if not photo or not name:
         return await m.reply(
+            "🔨 افزودن سلبریتی به تیر مزایده\n\n"
+            "استفاده:\n/addau [file_id عکس] [اسم]\n\n"
+            "یا روی یه عکس ریپلای کن و بنویس:\n/addau [اسم]\n\n"
+            "بعدش با /auction [اسم] مزایده‌ش رو شروع کن؛ هرکی ببره تو کالکشنش میاد.\n"
+            "(file_id رو با /getfileid بگیر. اگه اسم قبلاً تو این تیر بود، عکسش عوض می‌شه.)"
+        )
+    if len(name) > 60 or name.startswith("-") or "\n" in name:
+        return await m.reply("❌ اسم نامعتبره (حداکثر ۶۰ حرف، با - شروع نشه).")
+    if name in CELEBS and CELEBS[name][0] != "AU":
+        return await m.reply(f"❌ «{name}» از قبل تو یه تیر دیگه‌ست ({TIER_SHORT.get(CELEBS[name][0])}). یه اسم دیگه بذار.")
+    updating = name in CELEBS
+    try:
+        await m.bot.send_photo(
+            m.chat.id, photo,
+            caption=f"{'♻️ عکس به‌روز شد' if updating else '✅ به تیر مزایده اضافه شد'}\n\n👑 {name}\n🏅 تیر: {TIER_SHORT['AU']}\n\n🔨 /auction {name}"
+        )
+    except (TelegramBadRequest, TelegramForbiddenError):
+        return await m.reply("❌ این file_id معتبر نیست یا برای این ربات کار نمی‌کنه. با /getfileid یه file_id درست بگیر.")
+    register_au_celeb(name, photo, m.from_user.id)
+
+@dp.message(Command("aulist"))
+async def au_list(m: Message):
+    names = [n for n, v in CELEBS.items() if v[0] == "AU"]
+    if not names:
+        return await m.reply("🔨 هنوز سلبریتی‌ای تو تیر مزایده ثبت نشده.\n(ادمین با /addau اضافه می‌کنه)")
+    listing = "\n".join(f"• {n}" for n in sorted(names))
+    await m.reply(f"🔨 سلبریتی‌های تیر مزایده ({len(names)} تا):\n\n{listing}")
+
+@dp.message(Command("auction"))
+async def auction_start(m: Message):
+    if m.from_user.id not in ADMIN_IDS:
+        return await m.reply("❌ دسترسی ندارید!")
+    if m.chat.type == "private":
+        return await m.reply("❌ این دستور رو باید تو گروه بزنی.")
+    raw = m.text.split(maxsplit=1)
+    args = raw[1].strip() if len(raw) > 1 else ""
+    photo = name = None
+    if not (m.reply_to_message and m.reply_to_message.photo) and args in CELEBS and CELEBS[args][0] == "AU":
+        name, photo = args, CELEBS[args][3]  # از کاتالوگ تیر مزایده
+    elif m.reply_to_message and m.reply_to_message.photo:
+        photo = m.reply_to_message.photo[-1].file_id
+        name = args
+    else:
+        parts = args.split(maxsplit=1)
+        if len(parts) == 2:
+            photo, name = parts[0], parts[1].strip()
+    if not photo or not name:
+        return await m.reply(
             "استفاده:\n/auction [file_id عکس] [اسم]\n\n"
             "یا روی یه عکس ریپلای کن و بنویس:\n/auction [اسم]\n\n"
+            "یا فقط اسم یه سلبریتی که تو تیر مزایده ثبت کردی:\n/auction [اسم]  (لیست: /aulist)\n\n"
             "می‌تونی هرچندتا مزایده همزمان بذاری."
         )
     now = int(time.time())
@@ -2508,7 +2661,7 @@ async def reset_group(m: Message):
         "game_loans", "mafia_battles", "mafia2_battles", "collections",
         "company_rounds", "company_options", "company_investments",
         "company_participants", "owned_companies",
-        "farm_tiles", "farm_inventory", "farm_records", "auctions", "climb_games", "blackjack_games",
+        "farm_tiles", "farm_inventory", "farm_records", "auctions", "climb_games", "blackjack_games", "wealth_tax", "activity", "play_log",
     ):
         c.execute(f"DELETE FROM {table} WHERE chat_id=?", (chat_id,))
     # جدول‌هایی که فقط از طریق battle_id به گروه وصلن
@@ -3143,6 +3296,7 @@ async def box_start(m: Message):
         return await m.reply("❌ سانت کافی نداری.")
     if not take_token(m.chat.id, uid):
         return await m.reply(no_token_text(m.chat.id, uid))
+    log_play(m.chat.id, uid, "game")
     now = int(time.time())
     for k in [k for k, g in BOX_GAMES.items() if now - g["ts"] > BOX_TTL]:
         BOX_GAMES.pop(k, None)
@@ -3286,6 +3440,7 @@ async def climb_start(m: Message):
         return await m.reply("❌ سانت کافی نداری.")
     if not take_token(chat_id, uid):
         return await m.reply(no_token_text(chat_id, uid))
+    log_play(chat_id, uid, "game")
     c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (bet, chat_id, uid))
     c.execute("INSERT OR REPLACE INTO climb_games(chat_id,user_id,bet,step,ts,msg_id) VALUES(?,?,?,0,?,0)", (chat_id, uid, bet, now))
     db.commit()
@@ -3497,6 +3652,7 @@ async def bj_start(m: Message):
         return await m.reply("❌ سانت کافی نداری.")
     if not take_token(chat_id, uid):
         return await m.reply(no_token_text(chat_id, uid))
+    log_play(chat_id, uid, "game")
     deck = bj_new_deck()
     player = [deck.pop(), deck.pop()]
     dealer = [deck.pop(), deck.pop()]
@@ -3565,6 +3721,209 @@ async def bj_press(q: CallbackQuery):
         return await q.answer()
     await q.answer()
 
+# ===== فعالیت بازیکنا (برای پخش مالیات) =====
+# هر پیام تو گروه حساب می‌شه؛ «فعال‌ترین‌ها» = بیشترین پیام تو ACTIVITY_WINDOW_DAYS روز اخیر (فقط کسایی که بازیکن هستن)
+from aiogram import BaseMiddleware
+
+c.execute("""CREATE TABLE IF NOT EXISTS activity(
+    chat_id INTEGER,
+    user_id INTEGER,
+    day INTEGER,
+    cnt INTEGER DEFAULT 0,
+    PRIMARY KEY(chat_id, user_id, day)
+)""")
+db.commit()
+
+def record_activity(chat_id, uid):
+    day = int(time.time() // 86400)
+    c.execute(
+        "INSERT INTO activity(chat_id,user_id,day,cnt) VALUES(?,?,?,1) "
+        "ON CONFLICT(chat_id,user_id,day) DO UPDATE SET cnt=cnt+1",
+        (chat_id, uid, day)
+    )
+    db.commit()
+
+class ActivityMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        try:
+            if (isinstance(event, Message) and event.chat.type in ("group", "supergroup")
+                    and event.from_user and not event.from_user.is_bot):
+                record_activity(event.chat.id, event.from_user.id)
+        except Exception:
+            logger.exception("activity record failed")
+        return await handler(event, data)
+
+dp.message.outer_middleware(ActivityMiddleware())
+
+def top_active(chat_id, exclude_uid=0, limit=TAX_RECIPIENTS):
+    since = int(time.time() // 86400) - ACTIVITY_WINDOW_DAYS + 1
+    rows = c.execute(
+        "SELECT a.user_id, SUM(a.cnt) AS n FROM activity a "
+        "JOIN users u ON u.chat_id=a.chat_id AND u.user_id=a.user_id "
+        "WHERE a.chat_id=? AND a.day>=? AND a.user_id!=? "
+        "GROUP BY a.user_id ORDER BY n DESC, a.user_id LIMIT ?",
+        (chat_id, since, exclude_uid, limit)
+    ).fetchall()
+    return [(r[0], r[1]) for r in rows]
+
+def distribute_tax(chat_id, payer_uid, amount):
+    """مالیات رو بین فعال‌ترین‌ها (به‌جز پرداخت‌کننده) پخش می‌کنه؛ commit با خود صدازننده‌ست.
+    خروجی: لیست (user_id, سهم). اگه فعالی نباشه لیست خالیه (مالیات می‌سوزه)."""
+    recips = [u for u, _ in top_active(chat_id, payer_uid)]
+    if not recips or amount <= 0:
+        return []
+    share, rem = divmod(amount, len(recips))
+    out = []
+    for i, uid in enumerate(recips):
+        part = share + (rem if i == 0 else 0)  # باقی‌مونده‌ی تقسیم می‌ره به فعال‌ترین
+        if part > 0:
+            c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (part, chat_id, uid))
+            out.append((uid, part))
+    return out
+
+# ===== راه فرار مالیاتی: لاگ دوئل‌ها و مینی‌گیم‌ها =====
+c.execute("""CREATE TABLE IF NOT EXISTS play_log(
+    chat_id INTEGER,
+    user_id INTEGER,
+    kind TEXT,
+    ts INTEGER
+)""")
+c.execute("CREATE INDEX IF NOT EXISTS idx_play_log ON play_log(chat_id, user_id, kind, ts)")
+db.commit()
+
+def log_play(chat_id, uid, kind):
+    """kind: 'duel' (دوئل تموم‌شده) یا 'game' (شروع یه مینی‌گیم)"""
+    c.execute("INSERT INTO play_log(chat_id,user_id,kind,ts) VALUES(?,?,?,?)", (chat_id, uid, kind, int(time.time())))
+    db.commit()
+
+def tax_exempt(chat_id, uid):
+    """خروجی: (معافه؟، تعداد دوئل، تعداد بازی) تو TAX_EVASION_WINDOW اخیر."""
+    since = int(time.time()) - TAX_EVASION_WINDOW
+    def count(kind):
+        return c.execute(
+            "SELECT COUNT(*) FROM play_log WHERE chat_id=? AND user_id=? AND kind=? AND ts>=?",
+            (chat_id, uid, kind, since)
+        ).fetchone()[0]
+    duels, games = count("duel"), count("game")
+    return (duels >= TAX_EVASION_DUELS and games >= TAX_EVASION_GAMES), duels, games
+
+def evade_status_text(chat_id, uid):
+    ex, nd, ng = tax_exempt(chat_id, uid)
+    state = "✅ الان از مالیات معافی!" if ex else "❌ هنوز نرسیدی"
+    return (
+        f"🕵️ راه فرار مالیاتی: {TAX_EVASION_DUELS} دوئل + {TAX_EVASION_GAMES} مینی‌گیم تو {TAX_EVASION_WINDOW//3600} ساعت اخیر = معافیت از هر دو مالیات\n"
+        f"📈 پیشرفت تو: {nd}/{TAX_EVASION_DUELS} دوئل | {ng}/{TAX_EVASION_GAMES} بازی — {state}"
+    )
+
+# ===== مالیات ثروت: هر ۲۴ ساعت ۵٪ سایز پولدارترین فرد گروه =====
+c.execute("""CREATE TABLE IF NOT EXISTS wealth_tax(
+    chat_id INTEGER PRIMARY KEY,
+    last_ts INTEGER
+)""")
+db.commit()
+
+def get_richest(chat_id):
+    return c.execute(
+        "SELECT user_id,size FROM users WHERE chat_id=? ORDER BY size DESC, user_id LIMIT 1", (chat_id,)
+    ).fetchone()
+
+def wealth_tax_amount(size_cm):
+    return 0 if size_cm <= 0 else max(1, int(size_cm * WEALTH_TAX_PCT + 0.5))
+
+async def apply_wealth_tax(bot, chat_id):
+    row = get_richest(chat_id)
+    if not row or row[1] <= 0:
+        return
+    uid, size_cm = row
+    exempt, nd, ng = tax_exempt(chat_id, uid)
+    if exempt:
+        await bot.send_message(
+            chat_id,
+            f"🕵️ فرار مالیاتی موفق!\n\n"
+            f"👑 {get_name(chat_id, uid)} پولدارترین فرد گروهه ولی تو {TAX_EVASION_WINDOW//3600} ساعت اخیر "
+            f"{nd} دوئل و {ng} بازی انجام داد و از مالیات امروز معاف شد.\n"
+            f"📏 سایزش: {size_cm} سانت\n\n"
+            f"⏳ مالیات بعدی {WEALTH_TAX_INTERVAL//3600} ساعت دیگه"
+        )
+        return
+    tax = min(size_cm, wealth_tax_amount(size_cm))
+    c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (tax, chat_id, uid))
+    payouts = distribute_tax(chat_id, uid, tax)
+    db.commit()
+    if payouts:
+        dist = f"\n\n🏆 مالیات بین {len(payouts)} فعال‌ترین بازیکن پخش شد:\n" + "\n".join(
+            f"🎁 {get_name(chat_id, u)}: +{amt} سانت" for u, amt in payouts)
+    else:
+        dist = "\n\n(بازیکن فعالی ثبت نشده بود؛ این بار مالیات سوخت.)"
+    await bot.send_message(
+        chat_id,
+        f"🏛 مالیات روزانه!\n\n"
+        f"👑 پولدارترین فرد گروه: {get_name(chat_id, uid)}\n"
+        f"📏 سایز قبل از مالیات: {size_cm} سانت\n"
+        f"💸 مالیات {int(WEALTH_TAX_PCT*100)}٪: {tax} سانت\n"
+        f"📏 سایز الان: {get_size(chat_id, uid)} سانت"
+        f"{dist}\n\n"
+        f"⏳ مالیات بعدی {WEALTH_TAX_INTERVAL//3600} ساعت دیگه"
+    )
+
+async def wealth_tax_loop(bot):
+    while True:
+        try:
+            now = int(time.time())
+            c.execute("DELETE FROM play_log WHERE ts<?", (now - 2 * TAX_EVASION_WINDOW,))
+            c.execute("DELETE FROM activity WHERE day<?", (now // 86400 - 30,))
+            db.commit()
+            chats = [r[0] for r in c.execute("SELECT DISTINCT chat_id FROM users WHERE chat_id<0").fetchall()]
+            for chat_id in chats:
+                try:
+                    row = c.execute("SELECT last_ts FROM wealth_tax WHERE chat_id=?", (chat_id,)).fetchone()
+                    if not row:  # اولین بار که گروه دیده می‌شه، تایمر ۲۴ ساعته از همین‌جا شروع می‌شه
+                        c.execute("INSERT INTO wealth_tax(chat_id,last_ts) VALUES(?,?)", (chat_id, now))
+                        db.commit()
+                        continue
+                    if now - row[0] >= WEALTH_TAX_INTERVAL:
+                        c.execute("UPDATE wealth_tax SET last_ts=? WHERE chat_id=?", (now, chat_id))
+                        db.commit()
+                        await apply_wealth_tax(bot, chat_id)
+                except Exception:
+                    logger.exception("wealth tax failed for chat %s", chat_id)
+        except Exception:
+            logger.exception("wealth_tax_loop error")
+        await asyncio.sleep(300)
+
+@dp.message(Command("tax"))
+async def tax_info(m: Message):
+    if m.chat.type == "private":
+        return await m.reply("❌ این دستور رو باید تو گروه بزنی.")
+    chat_id = m.chat.id
+    row = c.execute("SELECT last_ts FROM wealth_tax WHERE chat_id=?", (chat_id,)).fetchone()
+    if row:
+        left = WEALTH_TAX_INTERVAL - (int(time.time()) - row[0])
+        when = f"{fmt_time(left)} دیگه" if left > 0 else "تا چند دقیقه‌ی دیگه"
+    else:
+        when = "تایمرش هنوز شروع نشده (تا چند دقیقه‌ی دیگه شروع می‌شه)"
+    rich = get_richest(chat_id)
+    if rich and rich[1] > 0:
+        rich_txt = f"👑 الان پولدارترین: {get_name(chat_id, rich[0])} ({rich[1]} سانت) → مالیاتش: {min(rich[1], wealth_tax_amount(rich[1]))} سانت"
+        active = top_active(chat_id, rich[0])
+    else:
+        rich_txt = "👑 هنوز کسی سایز نداره."
+        active = top_active(chat_id, 0)
+    if active:
+        act_txt = "🏆 فعال‌ترین‌ها (گیرنده‌ی مالیات): " + "، ".join(f"{get_name(chat_id, u)} ({n} پیام)" for u, n in active)
+    else:
+        act_txt = "🏆 هنوز فعالی ثبت نشده (فعالیت از وقتی ربات آپدیت شد شمرده می‌شه)."
+    await m.reply(
+        "🏛 مالیات\n\n"
+        f"💰 مالیات ثروت: هر {WEALTH_TAX_INTERVAL//3600} ساعت {int(WEALTH_TAX_PCT*100)}٪ سایز پولدارترین فرد گروه کم می‌شه و بین {TAX_RECIPIENTS} فعال‌ترین بازیکن پخش می‌شه.\n"
+        f"{rich_txt}\n"
+        f"{act_txt}\n"
+        f"⏳ مالیات بعدی: {when}\n\n"
+        f"🌾 مالیات مزرعه: از صفحه‌ی {FARM_TAX_FROM_PAGE} پنل به بعد هر بار کاشتن {FARM_PLANT_TAX} سانت مالیات داره (اون هم بین فعال‌ترین‌ها پخش می‌شه).\n"
+        f"📊 «فعال» یعنی بیشترین پیام تو گروه تو {ACTIVITY_WINDOW_DAYS} روز اخیر.\n\n"
+        f"{evade_status_text(chat_id, m.from_user.id)}"
+    )
+
 async def main():
     bot=Bot(TOKEN)
     from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeDefault
@@ -3580,11 +3939,12 @@ async def main():
         BotCommand(command="tosperm", description="🧬 تبدیل سانت به اسپرم"),
         BotCommand(command="tocent", description="💰 تبدیل اسپرم به سانت"),
         BotCommand(command="top", description="🏆 جدول بزرگان"),
+        BotCommand(command="tax", description="🏛 مالیات پولدارترین فرد و مزرعه"),
         BotCommand(command="token", description="🎟 توکن‌های من و قیمت توکن"),
         BotCommand(command="buytoken", description="🛒 خرید توکن بازی"),
         BotCommand(command="box", description="🎁 مینی‌گیم جعبه‌ی شانس (۱ توکن)"),
-        BotCommand(command="climb", description="🪜 مینی‌گیم نردبان"),
-        BotCommand(command="bj", description="🃏 بلک‌جک (۲۱)"),
+        BotCommand(command="climb", description="🪜 مینی‌گیم نردبان (۱ توکن)"),
+        BotCommand(command="bj", description="🃏 بلک‌جک ۲۱ (۱ توکن)"),
         BotCommand(command="market", description="🛒 بازار سلبریتی"),
         BotCommand(command="collection", description="📚 کالکشن من"),
         BotCommand(command="spin", description="🎰 اسپین سلبریتی"),
@@ -3616,6 +3976,8 @@ async def main():
         BotCommand(command="bidcol", description="🖼 کالکشن مزایده‌ی من (بالاترین پیشنهادها)"),
         BotCommand(command="cancelbid", description="❌ لغو پیشنهاد من تو مزایده"),
         BotCommand(command="auction", description="🔨 شروع مزایده (ادمین)"),
+        BotCommand(command="aulist", description="🔨 لیست سلبریتی‌های تیر مزایده"),
+        BotCommand(command="addau", description="➕ افزودن سلبریتی به تیر مزایده (ادمین)"),
         BotCommand(command="endauction", description="🏁 پایان مزایده (ادمین)"),
         BotCommand(command="resetgroup", description="⚠️ پاک کردن کامل داده‌های این گروه (ادمین)"),
         BotCommand(command="addsperm", description="➕ افزودن اسپرم به کاربر (ادمین)"),
@@ -3628,6 +3990,7 @@ async def main():
     asyncio.create_task(check_loans(bot))
     asyncio.create_task(company_dividend_loop(bot))
     asyncio.create_task(auction_loop(bot))
+    asyncio.create_task(wealth_tax_loop(bot))
     await dp.start_polling(bot)
 
 if __name__=="__main__":
