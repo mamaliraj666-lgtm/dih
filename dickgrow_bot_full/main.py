@@ -358,7 +358,7 @@ HELP_SECTIONS = {
         "🖼 /bidcol — کالکشن مزایده‌ی تو: سلبریتی‌هایی که الان بالاترین پیشنهاد روشونه (با عکس) + مجموعشون و سانتی که بعد خرید همه می‌مونه (ریپلای کنی مال یکی دیگه رو می‌بینی)\n"
         "❌ /cancelbid [شماره] — لغو بالاترین پیشنهادت (کل سانتش برمی‌گرده و مزایده بدون پیشنهاد می‌مونه؛ دکمه‌ی لغو تو /bidcol هم همینو انجام میده)\n\n"
         "🔨 تیر مزایده: هر سلبریتی که تو مزایده ببری خودکار با عکسش میره تو /collection (تیر «🔨 مزایده»)؛ ارزشش همون مبلغیه که برنده شدی ولی قابل فروش نیست (/sell برای این تیر کار نمی‌کنه). اگه قبلاً داشته باشیش مبلغ برمی‌گرده.\n"
-        "👑 ادمین: /addau [file_id] [اسم] ثبت سلبریتی تو تیر مزایده | /aulist لیستش | /auction [اسم] شروع مزایده‌ش\n\n"
+        "👑 ادمین: /addau [file_id] [اسم] ثبت سلبریتی تو تیر مزایده | /aulist لیستش | /auction [اسم] شروع مزایده‌ش | /giveau [file_id] [اسم] (ریپلای روی کاربر) دادن مستقیم به یه نفر\n\n"
         "🔒 دکمه‌های ◀️ ▶️ کالکشن‌ها فقط برای کسیه که دستور رو زده؛ هرکی بخواد کالکشن خودش رو ببینه باید دستورش رو بزنه.\n\n"
         "سانت پیشنهادت همون لحظه بلوکه می‌شه و اگه کسی بالاتر بده برمی‌گرده. هر پیشنهاد جدید تایمر ۱۲ ساعته‌ی همون مزایده رو از اول می‌کنه؛ هرکس ۱۲ ساعت بدون پیشنهاد بالاتر بمونه برنده‌ست.\n\n"
         "ادمین:\n"
@@ -2194,6 +2194,70 @@ async def au_list(m: Message):
     listing = "\n".join(f"• {n}" for n in sorted(names))
     await m.reply(f"🔨 سلبریتی‌های تیر مزایده ({len(names)} تا):\n\n{listing}")
 
+# ===== دادن مستقیم سلبریتی تیر مزایده به یه کاربر (ادمین) =====
+# روی پیام کاربر ریپلای کن: /giveau [file_id عکس] [اسم]
+# اگه اسم از قبل تو تیر مزایده ثبت شده، فقط اسم کافیه: /giveau [اسم]
+@dp.message(Command("giveau"))
+async def give_au_celeb(m: Message):
+    if m.from_user.id not in ADMIN_IDS:
+        return await m.reply("❌ دسترسی ندارید!")
+    if m.chat.type == "private":
+        return await m.reply("❌ این دستور رو باید تو گروه بزنی.")
+    usage = (
+        "🎁 دادن سلبریتی تیر مزایده به یه کاربر\n\n"
+        "روی پیام همون کاربر ریپلای کن و بنویس:\n/giveau [file_id عکس] [اسم]\n\n"
+        "اگه اسم قبلاً تو تیر مزایده ثبت شده (/aulist) فقط اسم کافیه:\n/giveau [اسم]\n\n"
+        "(file_id رو با /getfileid بگیر. ارزش تو کالکشن ۰ می‌شه و قابل /sell نیست.)"
+    )
+    if not m.reply_to_message or not m.reply_to_message.from_user:
+        return await m.reply(usage)
+    target = m.reply_to_message.from_user
+    if target.is_bot:
+        return await m.reply("❌ نمی‌تونی به ربات سلبریتی بدی!")
+    raw = m.text.split(maxsplit=1)
+    args = raw[1].strip() if len(raw) > 1 else ""
+    if not args:
+        return await m.reply(usage)
+    photo = name = None
+    if args in CELEBS and CELEBS[args][0] == "AU":
+        name, photo = args, CELEBS[args][3]  # از کاتالوگ تیر مزایده
+    else:
+        parts = args.split(maxsplit=1)
+        if len(parts) == 2:
+            photo, name = parts[0], parts[1].strip()
+    if not photo or not name:
+        return await m.reply(usage)
+    if len(name) > 60 or name.startswith("-") or "\n" in name:
+        return await m.reply("❌ اسم نامعتبره (حداکثر ۶۰ حرف، با - شروع نشه).")
+    if name in CELEBS and CELEBS[name][0] != "AU":
+        return await m.reply(f"❌ «{name}» از قبل تو یه تیر دیگه‌ست ({TIER_SHORT.get(CELEBS[name][0])}). یه اسم دیگه بذار.")
+    chat_id = m.chat.id
+    user(chat_id, target.id, target.full_name)
+    already = c.execute(
+        "SELECT 1 FROM collections WHERE chat_id=? AND user_id=? AND celeb=?", (chat_id, target.id, name)
+    ).fetchone()
+    if already:
+        return await m.reply(f"❌ {target.full_name} این سلبریتی رو از قبل داره!")
+    try:
+        await m.bot.send_photo(
+            chat_id, photo,
+            caption=(
+                f"🎁 هدیه از تیر مزایده!\n\n"
+                f"👑 {name}\n"
+                f"🏅 تیر: {TIER_SHORT['AU']}\n"
+                f"👤 گیرنده: {target.full_name}\n\n"
+                f"✅ به کالکشنش اضافه شد."
+            )
+        )
+    except (TelegramBadRequest, TelegramForbiddenError):
+        return await m.reply("❌ این file_id معتبر نیست یا برای این ربات کار نمی‌کنه. با /getfileid یه file_id درست بگیر.")
+    register_au_celeb(name, photo, m.from_user.id)  # اگه جدیده تو کاتالوگ ثبت می‌شه، وگرنه عکسش همونه
+    c.execute(
+        "INSERT INTO collections(chat_id,user_id,celeb,paid_price,locked) VALUES(?,?,?,0,0)",
+        (chat_id, target.id, name)
+    )
+    db.commit()
+
 @dp.message(Command("auction"))
 async def auction_start(m: Message):
     if m.from_user.id not in ADMIN_IDS:
@@ -3978,6 +4042,7 @@ async def main():
         BotCommand(command="auction", description="🔨 شروع مزایده (ادمین)"),
         BotCommand(command="aulist", description="🔨 لیست سلبریتی‌های تیر مزایده"),
         BotCommand(command="addau", description="➕ افزودن سلبریتی به تیر مزایده (ادمین)"),
+        BotCommand(command="giveau", description="🎁 دادن سلبریتی تیر مزایده به کاربر (ادمین)"),
         BotCommand(command="endauction", description="🏁 پایان مزایده (ادمین)"),
         BotCommand(command="resetgroup", description="⚠️ پاک کردن کامل داده‌های این گروه (ادمین)"),
         BotCommand(command="addsperm", description="➕ افزودن اسپرم به کاربر (ادمین)"),
