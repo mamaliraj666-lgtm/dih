@@ -1,9 +1,9 @@
-import os, sqlite3, random, time, re, logging, traceback
+import os, sqlite3, random, time, re, logging, traceback, tempfile
 import aiohttp
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, InputMediaPhoto
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, FSInputFile
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -85,12 +85,6 @@ try:
 except sqlite3.OperationalError:
     pass
 
-try:
-    c.execute("ALTER TABLE users ADD COLUMN tokens INTEGER DEFAULT 0")
-    db.commit()
-except sqlite3.OperationalError:
-    pass
-
 c.execute("""CREATE TABLE IF NOT EXISTS farm_tiles(
     chat_id INTEGER,
     user_id INTEGER,
@@ -162,75 +156,7 @@ def get_name(chat_id,uid):
     row=c.execute("SELECT name FROM users WHERE chat_id=? AND user_id=?",(chat_id,uid)).fetchone()
     return row[0] if row else "کاربر"
 
-# ===== توکن بازی 🎟 =====
-# - هر دست مینی‌گیم (/box ، /climb ، /bj) ۱ توکن ورودی می‌خواد (جدا از شرط)
-# - قیمت هر توکن = ۵٪ سایز لحظه‌ی خرید (گرد‌شده به نزدیک‌ترین عدد، حداقل ۱ سانت)؛ تو یه خرید قیمت ثابته
-# - برنده‌ی دوئل (/pvp) با شانس بالا یه توکن هم می‌گیره
-TOKEN_PRICE_PCT = 0.05
-TOKEN_MAX_BUY = 20
-DUEL_TOKEN_CHANCE = 0.7
-
-# ===== مالیات 🏛 =====
-# - مالیات کاشت: از صفحه‌ی ۴ پنل مزرعه به بعد (هر صفحه ۹ زمین) هر بار کاشتن ۱۰۰ سانت
-# - مالیات ثروت: هر ۲۴ ساعت ۵٪ سایز پولدارترین فرد هر گروه
-# - هر دو مالیات بین ۳ تا از فعال‌ترین بازیکنای گروه (به‌جز پرداخت‌کننده) پخش می‌شن؛ اگه فعالی نباشه می‌سوزن
-FARM_TAX_FROM_PAGE = 4
-TAX_RECIPIENTS = 3
-ACTIVITY_WINDOW_DAYS = 7
-# راه فرار مالیاتی 🕵️: هر کی تو ۲۴ ساعت اخیر ۱۵ دوئل + ۱۰ مینی‌گیم (/box ، /climb ، /bj) انجام داده باشه از هر دو مالیات معافه
-TAX_EVASION_DUELS = 15
-TAX_EVASION_GAMES = 10
-TAX_EVASION_WINDOW = 24 * 3600
-FARM_PLANT_TAX = 100
-WEALTH_TAX_PCT = 0.05
-WEALTH_TAX_INTERVAL = 24 * 3600
-
-def plot_has_tax(plot_index):
-    """plot_index از ۰ شروع می‌شه؛ هر صفحه‌ی پنل FARM_PAGE_SIZE تا زمین داره."""
-    return plot_index // FARM_PAGE_SIZE + 1 >= FARM_TAX_FROM_PAGE
-
-def get_tokens(chat_id, uid):
-    row = c.execute("SELECT tokens FROM users WHERE chat_id=? AND user_id=?", (chat_id, uid)).fetchone()
-    return (row[0] or 0) if row else 0
-
-def token_price(size_cm):
-    return max(1, int(size_cm * TOKEN_PRICE_PCT + 0.5))
-
-def add_tokens(chat_id, uid, n=1):
-    c.execute("UPDATE users SET tokens=COALESCE(tokens,0)+? WHERE chat_id=? AND user_id=?", (n, chat_id, uid))
-    db.commit()
-
-def take_token(chat_id, uid):
-    """یه توکن مصرف می‌کنه؛ اگه نداشت False برمی‌گردونه."""
-    cur = c.execute(
-        "UPDATE users SET tokens=tokens-1 WHERE chat_id=? AND user_id=? AND COALESCE(tokens,0)>=1",
-        (chat_id, uid)
-    )
-    db.commit()
-    return cur.rowcount > 0
-
-def no_token_text(chat_id, uid):
-    price = token_price(get_size(chat_id, uid))
-    return (
-        "🎟 برای این بازی توکن لازمه!\n"
-        f"💰 الان هر توکن {price} سانته ({int(TOKEN_PRICE_PCT*100)}٪ سایزت)\n"
-        "🛒 /buytoken [تعداد] — خرید توکن\n"
-        "⚔️ برنده‌ی دوئل‌ها هم با شانس بالا توکن می‌گیره!"
-    )
-
 dp=Dispatcher()
-
-# ===== قفل دکمه‌های جابه‌جایی: هر پیام مال کسیه که دستور رو زده =====
-# callback_data همه‌ی دکمه‌های ◀️ ▶️ آیدی «بیننده» (کسی که دستور رو زده) رو داره؛
-# اگه کس دیگه‌ای بزنه فقط هشدار می‌گیره و پیام عوض نمی‌شه.
-NAV_LOCK_MSG = "🔒 این پیام مال کسیه که دستور رو زده — خودت دستورش رو بزن تا کالکشن مال خودت باشه."
-NAV_LEGACY_MSG = "⌛️ این پیام قدیمیه؛ دوباره دستورش رو بزن."
-
-async def nav_guard(q, viewer_id):
-    if q.from_user.id != viewer_id:
-        await q.answer(NAV_LOCK_MSG, show_alert=True)
-        return False
-    return True
 
 # ===== راهنمای بازی =====
 HELP_SECTIONS = {
@@ -242,71 +168,14 @@ HELP_SECTIONS = {
         "💳 /loan — گرفتن وام (با بهره)\n"
         "💵 /repay [مقدار] — پرداخت وام\n"
         "🧬 /tosperm [مقدار سانت] — تبدیل سانت به اسپرم (نرخ ۱ به ۲)\n"
-        "💰 /tocent [مقدار اسپرم] — تبدیل اسپرم به سانت\n"
-        "🎟 /token — دیدن توکن‌ها و قیمت فعلی هر توکن\n"
-        f"🛒 /buytoken [تعداد] — خرید توکن بازی (هر توکن = {int(TOKEN_PRICE_PCT*100)}٪ سایزت)\n"
-        f"🏛 /tax — مالیات: هر {WEALTH_TAX_INTERVAL//3600} ساعت {int(WEALTH_TAX_PCT*100)}٪ سایز پولدارترین فرد گروه کم می‌شه و بین {TAX_RECIPIENTS} فعال‌ترین بازیکن (بیشترین پیام تو {ACTIVITY_WINDOW_DAYS} روز اخیر) پخش می‌شه؛ این‌جا می‌بینی کی پولدارترینه و فعال‌ترین‌ها کی‌ان\n"
-        f"🕵️ فرار مالیاتی: اگه تو {TAX_EVASION_WINDOW//3600} ساعت اخیر {TAX_EVASION_DUELS} دوئل (/pvp) و {TAX_EVASION_GAMES} مینی‌گیم (/box ، /climb ، /bj) انجام داده باشی از هر دو مالیات معافی (پیشرفتت تو /tax)\n\n"
-        "🎮 بازی‌های سریع (جعبه، نردبان، بلک‌جک) تو بخش «مینی‌گیم‌ها» هستن و برای هر دست توکن می‌خوان."
-    ),
-    "games": (
-        "🎮 مینی‌گیم‌ها",
-        "همه‌ی این بازی‌ها با سانت کار می‌کنن، فقط تو گروه اجرا می‌شن و دکمه‌هاشون فقط برای کسیه که دستور رو زده.\n\n"
-        "🎟 رایگان نیستن! هر دست ۱ توکن ورودی می‌خواد (جدا از شرط):\n"
-        f"• خرید: /buytoken [تعداد] — هر توکن {int(TOKEN_PRICE_PCT*100)}٪ سایزت (حداقل ۱ سانت)\n"
-        f"• دوئل: برنده‌ی /pvp با {int(DUEL_TOKEN_CHANCE*100)}٪ شانس یه توکن هم می‌گیره\n"
-        "• موجودی: /token یا /size\n\n"
-        "🎁 /box [مبلغ] — جعبه‌ی شانس\n"
-        "۴ جعبه‌ی بسته میاد و یکی رو انتخاب می‌کنی: 💎 ×۳ | 🔄 شرطت برمی‌گرده | 💣💣 می‌سوزه. جای جعبه‌ها هر دور رندومه و آخرش همه‌شون باز می‌شن.\n"
-        "(حداکثر شرط ۱۰۰ سانت)\n\n"
-        "🪜 /climb [مبلغ] — نردبان\n"
-        "هر بار «برو بالاتر» رو بزنی ۷۵٪ شانس داری یه پله بری بالا و ضریبت بزرگ‌تر بشه (×۱.۳ تا ×۵.۶ تو پله‌ی ۶)؛ ۲۵٪ می‌افتی و کل شرط می‌سوزه. هر لحظه می‌تونی «برداشت» رو بزنی. رسیدن به پله‌ی ۶ خودکار برداشت می‌شه.\n"
-        "(حداکثر شرط ۱۰۰ سانت | ۳ دقیقه بی‌حرکتی = خودکار برداشت)\n\n"
-        "🃏 /bj [مبلغ] — بلک‌جک (۲۱)\n"
-        "بازی کارتی علیه دیلر: به ۲۱ نزدیک شو ولی ردش نکن! آموزش کامل با مثال تو بخش «🃏 بلک‌جک» همین راهنماست.\n"
-        "(حداکثر شرط ۱۰۰ سانت)\n\n"
-        "💡 شرط تو نردبان و بلک‌جک همون اول کم می‌شه؛ هر نفر تو هر گروه فقط یه دست فعال از هر کدوم داره و با ریستارت ربات هم چیزی گم نمی‌شه.\n"
-        "⚔️ بازی‌های دونفره (دوئل و مافیا) تو بخش «دوئل و رنک» و «مافیا» هستن."
-    ),
-    "blackjack": (
-        "🃏 بلک‌جک (۲۱)",
-        "🎯 هدف\n"
-        "دستت رو به ۲۱ نزدیک‌تر از دیلر کن، بدون اینکه از ۲۱ رد بشی. رد شدن از ۲۱ یعنی سوختن (Bust) و باخت فوری.\n\n"
-        "▶️ شروع بازی\n"
-        "/bj [مبلغ] — مثلاً /bj 20 (بین ۱ تا ۱۰۰ سانت؛ /blackjack هم کار می‌کنه)\n"
-        "هر دست ۱ توکن ورودی می‌خواد (با /buytoken می‌خری). شرطت همون اول کم می‌شه. دو کارت رو می‌گیری، دیلر هم دو کارت داره ولی فقط یکیش رو می‌بینی و اون یکی 🂠 مخفیه.\n\n"
-        "🔢 ارزش کارت‌ها\n"
-        "• ۲ تا ۱۰ → همون عدد\n"
-        "• J ، Q ، K → ۱۰ تا\n"
-        "• A (آس) → ۱۱ یا ۱؛ خودکار طوری حساب می‌شه که به نفعت باشه (مثلاً A + 9 = ۲۰، ولی A + 9 + 5 = ۱۵)\n\n"
-        "🎮 نوبت تو (دو دکمه)\n"
-        "🃏 کارت بگیر — یه کارت دیگه می‌گیری. اگه جمع بیشتر از ۲۱ شد می‌سوزی و دیلر اصلاً بازی نمی‌کنه. اگه دقیقاً ۲۱ شد، خودکار «بایست» زده می‌شه.\n"
-        "✋ بایست — دستت همین‌جا بسته می‌شه و نوبت دیلره.\n\n"
-        "🎩 نوبت دیلر\n"
-        "کارت مخفیش رو رو می‌کنه و تا وقتی جمعش کمتر از ۱۷ باشه کارت می‌گیره؛ روی ۱۷ یا بیشتر می‌ایسته. دیلر انتخابی نداره، همیشه همین قانون رو اجرا می‌کنه.\n\n"
-        "💰 نتیجه و پرداخت (مثلاً شرط ۲۰ سانتی)\n"
-        "🏆 جمعت از دیلر بیشتر (یا دیلر سوخت) → ×۲ → ۴۰ سانت می‌گیری (۲۰ سود)\n"
-        "🂡 بلک‌جک → ×۲.۵ → ۵۰ سانت می‌گیری (۳۰ سود)\n"
-        "🤝 جمع مساوی → شرطت برمی‌گرده (۲۰ سانت)\n"
-        "💥 جمعت از دیلر کمتر یا سوختی → ۲۰ سانت از دست میره\n\n"
-        "🂡 بلک‌جک یعنی چی؟\n"
-        "فقط وقتی که با همون دو کارت اول به ۲۱ برسی: یه آس + یه کارت ده‌تایی (۱۰ ، J ، Q ، K). ۲۱ با سه کارت و بیشتر بلک‌جک حساب نمی‌شه و فقط برد معمولیه. بلک‌جک همون اول بازی تموم می‌شه. اگه دیلر هم بلک‌جک بیاره مساویه؛ اگه فقط دیلر بیاره همون اول می‌بازی.\n\n"
-        "📖 مثال\n"
-        "دست تو: K♠ 6♥ (۱۶) | دیلر: 9♦ 🂠\n"
-        "«کارت بگیر» می‌زنی و 4♣ میاد → ۲۰. «بایست» می‌زنی. دیلر کارت مخفیش رو باز می‌کنه: 9♦ 7♣ = ۱۶ → کمتر از ۱۷ پس کارت می‌گیره و 8♠ میاد → ۲۴ و می‌سوزه. بردی!\n\n"
-        "💡 نکته‌ها\n"
-        "• ۱۷ یا بیشتر معمولاً امنه، بایست بزن. زیر ۱۲ هیچ خطری نداری و بگیر.\n"
-        "• اگه دیلر کارت رویی ضعیف داره (۲ تا ۶)، احتمال سوختنش بالاست.\n"
-        "• دابل و اسپلیت نداره، بازی ساده‌ست.\n\n"
-        "⏳ هر نفر تو هر گروه فقط یه دست فعال داره. اگه ۳ دقیقه هیچ حرکتی نکنی خودکار «بایست» زده می‌شه، و با ریستارت ربات هم دستت گم نمی‌شه."
+        "💰 /tocent [مقدار اسپرم] — تبدیل اسپرم به سانت"
     ),
     "pvp": (
         "⚔️ دوئل و رنک",
         "⚔️ /pvp [مبلغ شرط] — چالش دادن به یه نفر برای دوئل ۱ به ۱\n"
         "🏅 /rank — دیدن رنک، امتیاز (RP) و پیشرفت روزانه‌ت\n"
         "🏆 /ranktop — لیدربرد رنک گروه\n"
-        "\nنکته: شانس بردت تو دوئل ثابت نیست — اگه زیادی برده باشی شانست کم می‌شه، اگه زیادی باخته باشی شانست زیاد می‌شه تا عادلانه بمونه.\n\n"
-        f"🎟 برنده‌ی دوئل علاوه بر جایزه با {int(DUEL_TOKEN_CHANCE*100)}٪ شانس یه توکن بازی هم می‌گیره (/token)."
+        "\nنکته: شانس بردت تو دوئل ثابت نیست — اگه زیادی برده باشی شانست کم می‌شه، اگه زیادی باخته باشی شانست زیاد می‌شه تا عادلانه بمونه."
     ),
     "mafia": (
         "🔫 مافیا",
@@ -346,7 +215,6 @@ HELP_SECTIONS = {
         "✅ آماده‌ی برداشت → بزن روش تا اسپرم بگیری\n"
         "💀 فاسدشده → اگه دیر بجنبی نصف ارزشش رو می‌گیری\n\n"
         "از همون پنل می‌تونی زمین جدید باز کنی، یه تخم تکی شانسی بخری (۷ سانت)، یا یه پک ۳تایی بخری (۴۰ سانت). رنگ‌های ارزون (⚪🟢) شانس دارن موقع برداشت یه تخم دیگه از خودشون بندازن؛ بقیه (🔷🔵🟪🟣🟡) هیچ‌وقت تکرار نمی‌شن ولی سودشون بیشتره — هرچی کمیاب‌تر، دیرتر می‌رسه ولی سودش نامتناسب بیشتره.\n\n"
-        f"💰 مالیات کاشت: از صفحه‌ی {FARM_TAX_FROM_PAGE} پنل به بعد (زمین‌های با علامت ➕💰) هر بار کاشتن {FARM_PLANT_TAX} سانت مالیات داره؛ جدا از قیمت تخمه از سانتت کم می‌شه و بین {TAX_RECIPIENTS} فعال‌ترین بازیکن گروه پخش می‌شه. سانت کافی نداشته باشی نمی‌تونی بکاری. (با فرار مالیاتی — {TAX_EVASION_DUELS} دوئل و {TAX_EVASION_GAMES} بازی تو {TAX_EVASION_WINDOW//3600} ساعت — از این مالیات هم معاف می‌شی.)\n\n"
         "🌾 /farmrank — رنک مزرعه‌ی خودت، بر اساس دقیقاً چیزی که الان تو زمین‌ها و انبارته\n"
         "📊 /farmleader — جدول رنک مزرعه‌ی کل گروه"
     ),
@@ -354,12 +222,7 @@ HELP_SECTIONS = {
         "🔨 مزایده",
         "🔨 /bid [مبلغ] — پیشنهاد دادن (اگه چندتا مزایده همزمان فعاله: /bid [شماره] [مبلغ] یا ریپلای روی عکس همون مزایده)\n"
         "📋 /auctionstatus — دیدن همه‌ی مزایده‌های فعال، بالاترین پیشنهادها و زمان باقی‌مونده\n"
-        "🗂 /aucol — کالکشن همه‌ی مزایده‌های فعال با عکس، بالاترین پیشنهاد، حداقل پیشنهاد بعدی و زمان باقی‌مونده\n"
-        "🖼 /bidcol — کالکشن مزایده‌ی تو: سلبریتی‌هایی که الان بالاترین پیشنهاد روشونه (با عکس) + مجموعشون و سانتی که بعد خرید همه می‌مونه (ریپلای کنی مال یکی دیگه رو می‌بینی)\n"
-        "❌ /cancelbid [شماره] — لغو بالاترین پیشنهادت (کل سانتش برمی‌گرده و مزایده بدون پیشنهاد می‌مونه؛ دکمه‌ی لغو تو /bidcol هم همینو انجام میده)\n\n"
-        "🔨 تیر مزایده: هر سلبریتی که تو مزایده ببری خودکار با عکسش میره تو /collection (تیر «🔨 مزایده»)؛ ارزشش همون مبلغیه که برنده شدی ولی قابل فروش نیست (/sell برای این تیر کار نمی‌کنه). اگه قبلاً داشته باشیش مبلغ برمی‌گرده.\n"
-        "👑 ادمین: /addau [file_id] [اسم] ثبت سلبریتی تو تیر مزایده | /aulist لیستش | /auction [اسم] شروع مزایده‌ش | /giveau [file_id] [اسم] (ریپلای روی کاربر) دادن مستقیم به یه نفر\n\n"
-        "🔒 دکمه‌های ◀️ ▶️ کالکشن‌ها فقط برای کسیه که دستور رو زده؛ هرکی بخواد کالکشن خودش رو ببینه باید دستورش رو بزنه.\n\n"
+        "🗂️ /myauctions — کالکشن مزایده‌ی خودت: پیشنهادهای بالای فعلی، سانت بلوکه‌شده و باقی‌مونده، و همه‌ی مزایده‌هایی که تا حالا بردی (برای دیدن مال یکی دیگه روی پیامش ریپلای کن)\n\n"
         "سانت پیشنهادت همون لحظه بلوکه می‌شه و اگه کسی بالاتر بده برمی‌گرده. هر پیشنهاد جدید تایمر ۱۲ ساعته‌ی همون مزایده رو از اول می‌کنه؛ هرکس ۱۲ ساعت بدون پیشنهاد بالاتر بمونه برنده‌ست.\n\n"
         "ادمین:\n"
         "🔨 /auction [file_id] [اسم] — شروع یه مزایده‌ی جدید (یا ریپلای رو یه عکس: /auction [اسم])؛ هرچندتا که بخوای همزمان\n"
@@ -367,11 +230,10 @@ HELP_SECTIONS = {
     ),
 }
 
-def help_main_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
+@dp.message(Command("help"))
+async def help_cmd(m: Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💰 اقتصاد پایه", callback_data="help:econ")],
-        [InlineKeyboardButton(text="🎮 مینی‌گیم‌ها", callback_data="help:games")],
-        [InlineKeyboardButton(text="🃏 بلک‌جک", callback_data="help:blackjack")],
         [InlineKeyboardButton(text="⚔️ دوئل و رنک", callback_data="help:pvp")],
         [InlineKeyboardButton(text="🔫 مافیا", callback_data="help:mafia")],
         [InlineKeyboardButton(text="🌟 سلبریتی‌ها", callback_data="help:celeb")],
@@ -379,10 +241,6 @@ def help_main_kb():
         [InlineKeyboardButton(text="🌾 مزرعه", callback_data="help:farm")],
         [InlineKeyboardButton(text="🔨 مزایده", callback_data="help:auction")],
     ])
-
-@dp.message(Command("help"))
-async def help_cmd(m: Message):
-    kb = help_main_kb()
     await m.reply(
         "📖 راهنمای بازی\n\n"
         "یه بخش رو انتخاب کن تا کامندهاش رو ببینی:",
@@ -392,7 +250,15 @@ async def help_cmd(m: Message):
 @dp.callback_query(F.data.startswith("help:"))
 async def help_section(q: CallbackQuery):
     key = q.data.split(":")[1]
-    main_kb = help_main_kb()
+    main_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💰 اقتصاد پایه", callback_data="help:econ")],
+        [InlineKeyboardButton(text="⚔️ دوئل و رنک", callback_data="help:pvp")],
+        [InlineKeyboardButton(text="🔫 مافیا", callback_data="help:mafia")],
+        [InlineKeyboardButton(text="🌟 سلبریتی‌ها", callback_data="help:celeb")],
+        [InlineKeyboardButton(text="📈 بورس", callback_data="help:bourse")],
+        [InlineKeyboardButton(text="🌾 مزرعه", callback_data="help:farm")],
+        [InlineKeyboardButton(text="🔨 مزایده", callback_data="help:auction")],
+    ])
     if key == "back" or key not in HELP_SECTIONS:
         await q.message.edit_text("📖 راهنمای بازی\n\nیه بخش رو انتخاب کن تا کامندهاش رو ببینی:", reply_markup=main_kb)
         return await q.answer()
@@ -427,7 +293,7 @@ async def size(m:Message):
     user(m.chat.id,m.from_user.id,m.from_user.full_name)
     s,sp,d=c.execute("SELECT size,sperm,debt FROM users WHERE chat_id=? AND user_id=?",(m.chat.id,m.from_user.id)).fetchone()
     await m.reply(
-        f"📊 پروفایل شما\n\n🍆 اندازه: {s} سانت\n🧬 اسپرم (بورس): {sp}\n💸 بدهی: {d} سانت\n🎟 توکن بازی: {get_tokens(m.chat.id, m.from_user.id)}"
+        f"📊 پروفایل شما\n\n🍆 اندازه: {s} سانت\n🧬 اسپرم (بورس): {sp}\n💸 بدهی: {d} سانت"
     )
 
 @dp.message(Command("tosperm"))
@@ -565,7 +431,7 @@ def build_farm_keyboard(chat_id, uid, page):
             label = {"growing": f"{emoji}⏳", "ready": f"✅{emoji}", "spoiled": f"💀{emoji}"}[state]
             row.append(InlineKeyboardButton(text=label, callback_data=f"farm:tile:{page}:{i}"))
         else:
-            row.append(InlineKeyboardButton(text="➕💰" if plot_has_tax(i) else "➕", callback_data=f"farm:tile:{page}:{i}"))
+            row.append(InlineKeyboardButton(text="➕", callback_data=f"farm:tile:{page}:{i}"))
         if len(row) == 3:
             rows.append(row)
             row = []
@@ -586,10 +452,7 @@ def build_farm_keyboard(chat_id, uid, page):
 def build_farm_text(chat_id, uid):
     inv = get_inventory(chat_id, uid)
     inv_txt = "، ".join(f"{EGGS[t]['emoji']}×{n}" for t, n in inv.items()) if inv else "خالیه"
-    return (
-        f"🌾 مزرعه‌ی اسپرم\n\n📦 انبار تخم: {inv_txt}\n\n➕ زمین خالی | ⏳ در حال رشد | ✅ آماده‌ی برداشت | 💀 فاسدشده (نصف ارزش)\n\n"
-        f"💰 کاشتن از صفحه‌ی {FARM_TAX_FROM_PAGE} به بعد (➕💰) هر بار {FARM_PLANT_TAX} سانت مالیات داره (بین {TAX_RECIPIENTS} فعال‌ترین بازیکن پخش می‌شه)"
-    )
+    return f"🌾 مزرعه‌ی اسپرم\n\n📦 انبار تخم: {inv_txt}\n\n➕ زمین خالی | ⏳ در حال رشد | ✅ آماده‌ی برداشت | 💀 فاسدشده (نصف ارزش)"
 
 @dp.message(Command("farm"))
 async def farm_cmd(m: Message):
@@ -697,8 +560,7 @@ async def farm_tile(q: CallbackQuery):
         [InlineKeyboardButton(text=f"{EGGS[t]['emoji']} {EGGS[t]['name']} ({n} تا)", callback_data=f"farm:plant:{page}:{num}:{t}")]
         for t, n in inv.items()
     ] + [[InlineKeyboardButton(text="⬅️ برگشت", callback_data=f"farm:page:{page}")]])
-    tax_note = f"\n\n💰 کاشتن تو این زمین {FARM_PLANT_TAX} سانت مالیات داره (از صفحه‌ی {FARM_TAX_FROM_PAGE} به بعد)" if plot_has_tax(num) else ""
-    await q.message.edit_text(f"🌱 کدوم تخم رو تو این زمین بکاری؟{tax_note}", reply_markup=kb)
+    await q.message.edit_text(f"🌱 کدوم تخم رو تو این زمین بکاری؟", reply_markup=kb)
     await q.answer()
 
 @dp.callback_query(F.data.startswith("farm:plant:"))
@@ -709,26 +571,11 @@ async def farm_plant(q: CallbackQuery):
     row = c.execute("SELECT count FROM farm_inventory WHERE chat_id=? AND user_id=? AND egg_type=?", (chat_id, uid, egg_type)).fetchone()
     if not row or row[0] <= 0:
         return await q.answer("❌ دیگه از این نداری!", show_alert=True)
-    tax = FARM_PLANT_TAX if plot_has_tax(num) else 0
-    evaded = False
-    if tax and tax_exempt(chat_id, uid)[0]:
-        tax, evaded = 0, True
-    if tax and get_size(chat_id, uid) < tax:
-        return await q.answer(f"💸 کاشتن تو این زمین {tax} سانت مالیات داره و سانت کافی نداری!", show_alert=True)
     c.execute("UPDATE farm_inventory SET count=count-1 WHERE chat_id=? AND user_id=? AND egg_type=?", (chat_id, uid, egg_type))
     c.execute("INSERT INTO farm_tiles(chat_id,user_id,plot_num,egg_type,planted_at) VALUES(?,?,?,?,?)", (chat_id, uid, num, egg_type, int(time.time())))
-    paid_to = []
-    if tax:
-        c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (tax, chat_id, uid))
-        paid_to = distribute_tax(chat_id, uid, tax)
-    bump_farm_record(chat_id, uid, eggs_planted=1, spent_cm=tax)
+    bump_farm_record(chat_id, uid, eggs_planted=1)
     db.commit()
-    tax_msg = ""
-    if tax:
-        tax_msg = f"\n💰 {tax} سانت مالیات کاشت رفت" + (" و بین فعال‌ترین‌ها پخش شد." if paid_to else " (فعالی نبود، سوخت).")
-    if evaded:
-        tax_msg = "\n🕵️ فرار مالیاتی! از مالیات کاشت معاف شدی."
-    await q.answer(f"🌱 {EGGS[egg_type]['name']} کاشته شد!" + tax_msg)
+    await q.answer(f"🌱 {EGGS[egg_type]['name']} کاشته شد!")
     await q.message.edit_text(build_farm_text(chat_id, uid), reply_markup=build_farm_keyboard(chat_id, uid, page))
 
 # ===== رنک مزرعه بر اساس وضعیت فعلی پنل =====
@@ -1045,19 +892,13 @@ async def accept(q:CallbackQuery):
     winner = creator if random.random() < p_creator else opponent
     loser = opponent if winner == creator else creator
     bump_pvp_stats(chat_id, winner, loser)
-    log_play(chat_id, winner, "duel")
-    log_play(chat_id, loser, "duel")
     record_rank_duel(chat_id, winner, loser)
     c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?",(bet,chat_id,winner))
     c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?",(bet,chat_id,loser))
     c.execute("UPDATE battles SET active=0 WHERE id=?",(bid,))
     db.commit()
-    token_line = ""
-    if random.random() < DUEL_TOKEN_CHANCE:
-        add_tokens(chat_id, winner, 1)
-        token_line = "\n🎟 جایزه‌ی ویژه: یه توکن بازی هم به برنده رسید!"
     winner_name=get_name(chat_id,winner)
-    await q.message.edit_text(f"🏆 پایان دوئل!\n\n👑 برنده: {winner_name}\n💰 جایزه: {bet} سانت{token_line}\n🏅 +{RANK_WIN_RP} RP برنده | -{RANK_LOSS_RP} RP بازنده\n\n😂 بازنده باید بیشتر تمرین کنه!")
+    await q.message.edit_text(f"🏆 پایان دوئل!\n\n👑 برنده: {winner_name}\n💰 جایزه: {bet} سانت\n🏅 +{RANK_WIN_RP} RP برنده | -{RANK_LOSS_RP} RP بازنده\n\n😂 بازنده باید بیشتر تمرین کنه!")
 
 
 # ===== Mafia Team PvP System =====
@@ -1440,45 +1281,6 @@ TIER_LABELS = {
 }
 TIER_PRICES = {"S": (543, 438), "A": (350, 262), "B": (175, 88), "PH": (630, 525)}
 
-# ===== تیر مزایده (AU) 🔨 =====
-# - سلبریتی‌های این تیر فقط از مزایده به‌دست میان (تو /market و /spin و /buy نیستن)
-# - هر کی تو مزایده برنده شه، سلبریتی با عکسش میره تو /collection با تیر «🔨 مزایده»
-#   (اگه اسم مزایده تو کاتالوگ نباشه، خودکار با عکس مزایده تو همین تیر ثبت می‌شه)
-# - ارزش اون سلبریتی تو کالکشن = مبلغی که برنده‌ش شدی؛ ولی /sell برای این تیر بسته‌ست
-# - کاتالوگ تو دیتابیسه، پس با ریستارت ربات از بین نمی‌ره (ادمین با /addau اضافه می‌کنه)
-TIER_CELEBS["AU"] = []
-TIER_LABELS["AU"] = "🔨 Tier مزایده"
-TIER_SHORT = {"S": "🥇 S", "A": "🥈 A", "B": "🥉 B", "PH": "💎 PH", "AU": "🔨 مزایده"}
-
-c.execute("""CREATE TABLE IF NOT EXISTS auction_celebs(
-    name TEXT PRIMARY KEY,
-    photo TEXT,
-    added_by INTEGER DEFAULT 0,
-    created_at INTEGER DEFAULT 0
-)""")
-db.commit()
-
-def register_au_celeb(name, photo, added_by=0, persist=True):
-    CELEBS[name] = ("AU", 0, 0, photo)
-    TIER_CELEBS["AU"] = [(n, v[1], v[3]) for n, v in CELEBS.items() if v[0] == "AU"]
-    if persist:
-        c.execute(
-            "INSERT OR REPLACE INTO auction_celebs(name,photo,added_by,created_at) VALUES(?,?,?,?)",
-            (name, photo, added_by, int(time.time()))
-        )
-        db.commit()
-
-def celeb_paid_value(chat_id, uid, name):
-    row = c.execute(
-        "SELECT paid_price FROM collections WHERE chat_id=? AND user_id=? AND celeb=?",
-        (chat_id, uid, name)
-    ).fetchone()
-    return row[0] if row else 0
-
-for _n, _p in c.execute("SELECT name, photo FROM auction_celebs").fetchall():
-    if _n not in CELEBS or CELEBS[_n][0] == "AU":
-        register_au_celeb(_n, _p, persist=False)
-
 def build_market_caption(tier, page):
     celebs = TIER_CELEBS[tier]
     name, price, photo = celebs[page]
@@ -1495,13 +1297,13 @@ def build_market_caption(tier, page):
     )
     return txt, photo
 
-def build_market_kb(tier, page, viewer_id):
+def build_market_kb(tier, page):
     celebs = TIER_CELEBS[tier]
     buttons = []
     if page > 0:
-        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"mkt:{viewer_id}:{tier}:{page-1}"))
+        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"mkt:{tier}:{page-1}"))
     if page < len(celebs) - 1:
-        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"mkt:{viewer_id}:{tier}:{page+1}"))
+        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"mkt:{tier}:{page+1}"))
     return InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
 
 async def fetch_photo(url: str) -> BufferedInputFile | None:
@@ -1557,7 +1359,7 @@ async def market(m:Message):
         if not TIER_CELEBS[tier]:
             continue
         txt, photo_url = build_market_caption(tier, 0)
-        kb = build_market_kb(tier, 0, m.from_user.id)
+        kb = build_market_kb(tier, 0)
         photo = await resolve_photo(photo_url) if photo_url else None
         try:
             if photo:
@@ -1574,15 +1376,10 @@ async def market(m:Message):
 
 @dp.callback_query(F.data.startswith("mkt:"))
 async def market_page_nav(q: CallbackQuery):
-    parts = q.data.split(":")
-    if len(parts) != 4:
-        return await q.answer(NAV_LEGACY_MSG, show_alert=True)
-    _, viewer_id, tier, page = parts
-    viewer_id, page = int(viewer_id), int(page)
-    if not await nav_guard(q, viewer_id):
-        return
+    _, tier, page = q.data.split(":")
+    page = int(page)
     txt, photo_url = build_market_caption(tier, page)
-    kb = build_market_kb(tier, page, viewer_id)
+    kb = build_market_kb(tier, page)
     photo = await resolve_photo(photo_url) if photo_url else None
     try:
         if photo and q.message.photo:
@@ -1622,23 +1419,20 @@ async def collection(m:Message):
 async def send_collection_page(chat_id, owner_id, celebs, page, bot, viewer_id=None):
     name = celebs[page]
     tier, price, spin, photo_url = CELEBS[name]
-    tier_label = TIER_SHORT.get(tier, tier)
-    if tier == "AU":
-        price = celeb_paid_value(chat_id, owner_id, name)
-    sell_line = "" if tier == "AU" else f"🛒 /sell {name}\n"
+    tier_label = {"S": "🥇 S", "A": "🥈 A", "B": "🥉 B", "PH": "💎 PH"}[tier]
     txt = (
         f"📚 کالکشن — {page+1}/{len(celebs)}\n\n"
         f"👑 {name}\n"
         f"🏅 تیر: {tier_label}\n"
         f"💰 ارزش: {price} سانت\n\n"
-        f"{sell_line}"
+        f"🛒 /sell {name}\n"
         f"🏪 /list {name} [قیمت]"
     )
     buttons = []
     if page > 0:
-        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"col:{viewer_id}:{owner_id}:{page-1}"))
+        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"col:{owner_id}:{page-1}"))
     if page < len(celebs) - 1:
-        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"col:{viewer_id}:{owner_id}:{page+1}"))
+        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"col:{owner_id}:{page+1}"))
     kb = InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
     photo = await resolve_photo(photo_url) if photo_url else None
     try:
@@ -1654,37 +1448,31 @@ async def send_collection_page(chat_id, owner_id, celebs, page, bot, viewer_id=N
 
 @dp.callback_query(F.data.startswith("col:"))
 async def collection_nav(q: CallbackQuery):
-    parts = q.data.split(":")
-    if len(parts) != 4:
-        return await q.answer(NAV_LEGACY_MSG, show_alert=True)
-    _, viewer_id, owner_id, page = parts
-    viewer_id, owner_id, page = int(viewer_id), int(owner_id), int(page)
-    if not await nav_guard(q, viewer_id):
-        return
+    _, owner_id, page = q.data.split(":")
+    owner_id = int(owner_id)
+    page = int(page)
     chat_id = q.message.chat.id
+    # allow anyone to browse
     rows = c.execute("SELECT celeb FROM collections WHERE chat_id=? AND user_id=?", (chat_id, owner_id)).fetchall()
     celebs = [r[0] for r in rows]
     if page >= len(celebs):
         page = len(celebs) - 1
     name = celebs[page]
     tier, price, spin, photo_url = CELEBS[name]
-    tier_label = TIER_SHORT.get(tier, tier)
-    if tier == "AU":
-        price = celeb_paid_value(chat_id, owner_id, name)
-    sell_line = "" if tier == "AU" else f"🛒 /sell {name}\n"
+    tier_label = {"S": "🥇 S", "A": "🥈 A", "B": "🥉 B", "PH": "💎 PH"}[tier]
     txt = (
         f"📚 کالکشن — {page+1}/{len(celebs)}\n\n"
         f"👑 {name}\n"
         f"🏅 تیر: {tier_label}\n"
         f"💰 ارزش: {price} سانت\n\n"
-        f"{sell_line}"
+        f"🛒 /sell {name}\n"
         f"🏪 /list {name} [قیمت]"
     )
     buttons = []
     if page > 0:
-        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"col:{viewer_id}:{owner_id}:{page-1}"))
+        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"col:{owner_id}:{page-1}"))
     if page < len(celebs) - 1:
-        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"col:{viewer_id}:{owner_id}:{page+1}"))
+        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"col:{owner_id}:{page+1}"))
     kb = InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
     photo = await resolve_photo(photo_url) if photo_url else None
     try:
@@ -1713,8 +1501,6 @@ async def buy(m:Message):
         return await m.reply("❌ سلبریتی پیدا نشد.")
 
     tier,price,spin,photo=CELEBS[name]
-    if tier == "AU":
-        return await m.reply("🔨 این سلبریتی مال تیر مزایده‌ست و فقط با برنده شدن تو مزایده به‌دست میاد!")
 
     user(m.chat.id,m.from_user.id,m.from_user.full_name)
 
@@ -1936,8 +1722,6 @@ async def sell(m:Message):
     name=strip_command(m.text)
     if name not in CELEBS:
         return await m.reply("❌ سلبریتی پیدا نشد.")
-    if CELEBS[name][0] == "AU":
-        return await m.reply("🔨 سلبریتی‌های تیر مزایده قابل فروش نیستن! این سلبریتی برای همیشه تو کالکشنته.")
     user(m.chat.id,m.from_user.id,m.from_user.full_name)
     owned=c.execute(
         "SELECT paid_price FROM collections WHERE chat_id=? AND user_id=? AND celeb=?",
@@ -2091,25 +1875,17 @@ def resolve_auction(m, token=None):
     return None, f"📊 چندتا مزایده همزمان فعاله، مشخص کن کدوم:\n{listing}\n\n(شماره‌ش رو بنویس یا روی عکس همون مزایده ریپلای کن)"
 
 async def finalize_auction(bot, auction_id, cancel=False):
-    row = c.execute("SELECT chat_id,name,top_bid,top_bidder,top_bidder_name,status,photo FROM auctions WHERE id=?", (auction_id,)).fetchone()
+    row = c.execute("SELECT chat_id,name,top_bid,top_bidder,top_bidder_name,status FROM auctions WHERE id=?", (auction_id,)).fetchone()
     if not row or row[5] != 'active':
         return False
-    chat_id, name, top_bid, top_bidder, top_bidder_name, _, a_photo = row
+    chat_id, name, top_bid, top_bidder, top_bidder_name, _ = row
     c.execute("UPDATE auctions SET status=? WHERE id=?", ('cancelled' if cancel else 'ended', auction_id))
     if cancel and top_bidder:
         c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (top_bid, chat_id, top_bidder))
     delivered = False
-    dup_refund = False
-    if not cancel and top_bidder:
-        if name not in CELEBS:
-            register_au_celeb(name, a_photo)  # تیر مزایده: خودکار با عکس مزایده ثبت می‌شه
-        already = c.execute("SELECT 1 FROM collections WHERE chat_id=? AND user_id=? AND celeb=?", (chat_id, top_bidder, name)).fetchone()
-        if already:
-            c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (top_bid, chat_id, top_bidder))
-            dup_refund = True
-        else:
-            c.execute("INSERT INTO collections(chat_id,user_id,celeb,paid_price) VALUES(?,?,?,?)", (chat_id, top_bidder, name, top_bid))
-            delivered = True
+    if not cancel and top_bidder and name in CELEBS:
+        c.execute("INSERT INTO collections(chat_id,user_id,celeb,paid_price) VALUES(?,?,?,?)", (chat_id, top_bidder, name, top_bid))
+        delivered = True
     db.commit()
     if cancel:
         txt = f"🔨 مزایده‌ی #{auction_id} («{name}») لغو شد."
@@ -2125,10 +1901,7 @@ async def finalize_auction(bot, auction_id, cancel=False):
             f"💰 مبلغ نهایی: {top_bid} سانت"
         )
         if delivered:
-            tier_note = " (تیر 🔨 مزایده)" if CELEBS.get(name, ("",))[0] == "AU" else ""
-            txt += f"\n\n✅ به کلکسیون برنده اضافه شد!{tier_note}"
-        elif dup_refund:
-            txt += f"\n\n↩️ این سلبریتی از قبل تو کلکسیون برنده بود، پس {top_bid} سانت بهش برگشت."
+            txt += "\n\n✅ به کلکسیون برنده اضافه شد!"
     try:
         await bot.send_message(chat_id, txt)
     except Exception:
@@ -2149,11 +1922,12 @@ async def auction_loop(bot):
         except Exception:
             logger.exception("auction_loop error")
 
-# ===== افزودن سلبریتی به تیر مزایده =====
-@dp.message(Command("addau"))
-async def add_au_celeb(m: Message):
+@dp.message(Command("auction"))
+async def auction_start(m: Message):
     if m.from_user.id not in ADMIN_IDS:
         return await m.reply("❌ دسترسی ندارید!")
+    if m.chat.type == "private":
+        return await m.reply("❌ این دستور رو باید تو گروه بزنی.")
     raw = m.text.split(maxsplit=1)
     args = raw[1].strip() if len(raw) > 1 else ""
     photo = name = None
@@ -2166,121 +1940,8 @@ async def add_au_celeb(m: Message):
             photo, name = parts[0], parts[1].strip()
     if not photo or not name:
         return await m.reply(
-            "🔨 افزودن سلبریتی به تیر مزایده\n\n"
-            "استفاده:\n/addau [file_id عکس] [اسم]\n\n"
-            "یا روی یه عکس ریپلای کن و بنویس:\n/addau [اسم]\n\n"
-            "بعدش با /auction [اسم] مزایده‌ش رو شروع کن؛ هرکی ببره تو کالکشنش میاد.\n"
-            "(file_id رو با /getfileid بگیر. اگه اسم قبلاً تو این تیر بود، عکسش عوض می‌شه.)"
-        )
-    if len(name) > 60 or name.startswith("-") or "\n" in name:
-        return await m.reply("❌ اسم نامعتبره (حداکثر ۶۰ حرف، با - شروع نشه).")
-    if name in CELEBS and CELEBS[name][0] != "AU":
-        return await m.reply(f"❌ «{name}» از قبل تو یه تیر دیگه‌ست ({TIER_SHORT.get(CELEBS[name][0])}). یه اسم دیگه بذار.")
-    updating = name in CELEBS
-    try:
-        await m.bot.send_photo(
-            m.chat.id, photo,
-            caption=f"{'♻️ عکس به‌روز شد' if updating else '✅ به تیر مزایده اضافه شد'}\n\n👑 {name}\n🏅 تیر: {TIER_SHORT['AU']}\n\n🔨 /auction {name}"
-        )
-    except (TelegramBadRequest, TelegramForbiddenError):
-        return await m.reply("❌ این file_id معتبر نیست یا برای این ربات کار نمی‌کنه. با /getfileid یه file_id درست بگیر.")
-    register_au_celeb(name, photo, m.from_user.id)
-
-@dp.message(Command("aulist"))
-async def au_list(m: Message):
-    names = [n for n, v in CELEBS.items() if v[0] == "AU"]
-    if not names:
-        return await m.reply("🔨 هنوز سلبریتی‌ای تو تیر مزایده ثبت نشده.\n(ادمین با /addau اضافه می‌کنه)")
-    listing = "\n".join(f"• {n}" for n in sorted(names))
-    await m.reply(f"🔨 سلبریتی‌های تیر مزایده ({len(names)} تا):\n\n{listing}")
-
-# ===== دادن مستقیم سلبریتی تیر مزایده به یه کاربر (ادمین) =====
-# روی پیام کاربر ریپلای کن: /giveau [file_id عکس] [اسم]
-# اگه اسم از قبل تو تیر مزایده ثبت شده، فقط اسم کافیه: /giveau [اسم]
-@dp.message(Command("giveau"))
-async def give_au_celeb(m: Message):
-    if m.from_user.id not in ADMIN_IDS:
-        return await m.reply("❌ دسترسی ندارید!")
-    if m.chat.type == "private":
-        return await m.reply("❌ این دستور رو باید تو گروه بزنی.")
-    usage = (
-        "🎁 دادن سلبریتی تیر مزایده به یه کاربر\n\n"
-        "روی پیام همون کاربر ریپلای کن و بنویس:\n/giveau [file_id عکس] [اسم]\n\n"
-        "اگه اسم قبلاً تو تیر مزایده ثبت شده (/aulist) فقط اسم کافیه:\n/giveau [اسم]\n\n"
-        "(file_id رو با /getfileid بگیر. ارزش تو کالکشن ۰ می‌شه و قابل /sell نیست.)"
-    )
-    if not m.reply_to_message or not m.reply_to_message.from_user:
-        return await m.reply(usage)
-    target = m.reply_to_message.from_user
-    if target.is_bot:
-        return await m.reply("❌ نمی‌تونی به ربات سلبریتی بدی!")
-    raw = m.text.split(maxsplit=1)
-    args = raw[1].strip() if len(raw) > 1 else ""
-    if not args:
-        return await m.reply(usage)
-    photo = name = None
-    if args in CELEBS and CELEBS[args][0] == "AU":
-        name, photo = args, CELEBS[args][3]  # از کاتالوگ تیر مزایده
-    else:
-        parts = args.split(maxsplit=1)
-        if len(parts) == 2:
-            photo, name = parts[0], parts[1].strip()
-    if not photo or not name:
-        return await m.reply(usage)
-    if len(name) > 60 or name.startswith("-") or "\n" in name:
-        return await m.reply("❌ اسم نامعتبره (حداکثر ۶۰ حرف، با - شروع نشه).")
-    if name in CELEBS and CELEBS[name][0] != "AU":
-        return await m.reply(f"❌ «{name}» از قبل تو یه تیر دیگه‌ست ({TIER_SHORT.get(CELEBS[name][0])}). یه اسم دیگه بذار.")
-    chat_id = m.chat.id
-    user(chat_id, target.id, target.full_name)
-    already = c.execute(
-        "SELECT 1 FROM collections WHERE chat_id=? AND user_id=? AND celeb=?", (chat_id, target.id, name)
-    ).fetchone()
-    if already:
-        return await m.reply(f"❌ {target.full_name} این سلبریتی رو از قبل داره!")
-    try:
-        await m.bot.send_photo(
-            chat_id, photo,
-            caption=(
-                f"🎁 هدیه از تیر مزایده!\n\n"
-                f"👑 {name}\n"
-                f"🏅 تیر: {TIER_SHORT['AU']}\n"
-                f"👤 گیرنده: {target.full_name}\n\n"
-                f"✅ به کالکشنش اضافه شد."
-            )
-        )
-    except (TelegramBadRequest, TelegramForbiddenError):
-        return await m.reply("❌ این file_id معتبر نیست یا برای این ربات کار نمی‌کنه. با /getfileid یه file_id درست بگیر.")
-    register_au_celeb(name, photo, m.from_user.id)  # اگه جدیده تو کاتالوگ ثبت می‌شه، وگرنه عکسش همونه
-    c.execute(
-        "INSERT INTO collections(chat_id,user_id,celeb,paid_price,locked) VALUES(?,?,?,0,0)",
-        (chat_id, target.id, name)
-    )
-    db.commit()
-
-@dp.message(Command("auction"))
-async def auction_start(m: Message):
-    if m.from_user.id not in ADMIN_IDS:
-        return await m.reply("❌ دسترسی ندارید!")
-    if m.chat.type == "private":
-        return await m.reply("❌ این دستور رو باید تو گروه بزنی.")
-    raw = m.text.split(maxsplit=1)
-    args = raw[1].strip() if len(raw) > 1 else ""
-    photo = name = None
-    if not (m.reply_to_message and m.reply_to_message.photo) and args in CELEBS and CELEBS[args][0] == "AU":
-        name, photo = args, CELEBS[args][3]  # از کاتالوگ تیر مزایده
-    elif m.reply_to_message and m.reply_to_message.photo:
-        photo = m.reply_to_message.photo[-1].file_id
-        name = args
-    else:
-        parts = args.split(maxsplit=1)
-        if len(parts) == 2:
-            photo, name = parts[0], parts[1].strip()
-    if not photo or not name:
-        return await m.reply(
             "استفاده:\n/auction [file_id عکس] [اسم]\n\n"
             "یا روی یه عکس ریپلای کن و بنویس:\n/auction [اسم]\n\n"
-            "یا فقط اسم یه سلبریتی که تو تیر مزایده ثبت کردی:\n/auction [اسم]  (لیست: /aulist)\n\n"
             "می‌تونی هرچندتا مزایده همزمان بذاری."
         )
     now = int(time.time())
@@ -2370,291 +2031,50 @@ async def auction_status(m: Message):
     txt += "برای پیشنهاد: /bid [شماره] [مبلغ]"
     await m.reply(txt)
 
-# ===== کالکشن مزایده: سلبریتی‌هایی که الان بالاترین پیشنهاد روشونه =====
-# - هیچ سانت جدیدی کم/زیاد نمی‌شه؛ این بخش فقط نمایشیه (حساب‌وکتاب).
-# - /bid از قبل سانت پیشنهاد رو همون لحظه بلوکه می‌کنه، پس سانت «آزاد» الان یعنی
-#   همون چیزی که بعد از خریدن همه‌ی این سلبریتی‌ها برات می‌مونه.
-# - وقتی مزایده تموم بشه، سلبریتی خودکار میره تو /collection (finalize_auction)
-def get_top_bid_auctions(chat_id, uid):
-    return c.execute(
-        "SELECT id,name,photo,top_bid,last_activity FROM auctions "
-        "WHERE chat_id=? AND status='active' AND top_bidder=? ORDER BY top_bid DESC, id",
+AUCTION_COLLECTION_MAX_LINES = 15   # حداکثر تعداد مزایده‌ی بردشده که تو لیست نشون داده می‌شه
+
+def build_auction_collection_text(chat_id, uid):
+    """کالکشن مزایده‌ی یه نفر: پیشنهادهای بالای فعلی + همه‌ی مزایده‌هایی که قبلاً بردی (از دیتابیس خونده می‌شه، پس سابقه‌ی قبل از این آپدیت هم هست)."""
+    now = int(time.time())
+    leading = c.execute(
+        "SELECT id,name,top_bid,last_activity FROM auctions WHERE chat_id=? AND status='active' AND top_bidder=? ORDER BY top_bid DESC",
         (chat_id, uid)
     ).fetchall()
-
-def build_bidcol_page(chat_id, owner_id, page, viewer_id):
-    """خروجی: (متن، file_id عکس، کیبورد) یا (None, None, None) اگه چیزی نباشه."""
-    rows = get_top_bid_auctions(chat_id, owner_id)
-    if not rows:
-        return None, None, None
-    page = max(0, min(page, len(rows) - 1))
-    aid, name, photo, bid, last = rows[page]
-    total = sum(r[3] for r in rows)
-    free = get_size(chat_id, owner_id)
-    left = AUCTION_IDLE_SECONDS - (int(time.time()) - last)
-    owner_name = get_name(chat_id, owner_id)
-    txt = (
-        f"🔨 کالکشن مزایده‌ی {owner_name} — {page+1}/{len(rows)}\n\n"
-        f"👑 {name}\n"
-        f"🆔 مزایده‌ی #{aid}\n"
-        f"💰 بالاترین پیشنهاد (مال {owner_name}): {bid} سانت\n"
-        f"⏳ {fmt_time(left)} تا پایان (اگه پیشنهاد بالاتری نیاد)\n\n"
-        f"━━━━━━━━━━━━\n"
-        f"🧮 جمع حساب ({len(rows)} سلبریتی)\n"
-        f"💼 مجموع پیشنهادهای برتر: {total} سانت\n"
-        f"📏 سانت قبل از پیشنهادها: {free + total}\n"
-        f"➖ کم‌شده برای خریدشون: {total}\n"
-        f"✅ سانت باقی‌مونده اگه همه‌شون رو ببره: {free}\n"
-        f"(سانت پیشنهادها از قبل تو مزایده بلوکه شده؛ چیز جدیدی کم نمی‌شه)"
-    )
-    buttons = []
-    if page > 0:
-        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"bcol:{viewer_id}:{owner_id}:{page-1}"))
-    if page < len(rows) - 1:
-        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"bcol:{viewer_id}:{owner_id}:{page+1}"))
-    rows_kb = [buttons] if buttons else []
-    if viewer_id == owner_id:  # دکمه‌ی لغو فقط تو کالکشن خود صاحب پیشنهاد
-        rows_kb.append([InlineKeyboardButton(text="❌ لغو این پیشنهاد", callback_data=f"cbid:{owner_id}:{aid}")])
-    kb = InlineKeyboardMarkup(inline_keyboard=rows_kb) if rows_kb else None
-    return txt, photo, kb
-
-@dp.message(Command("bidcol"))
-async def bid_collection(m: Message):
-    if m.reply_to_message and m.reply_to_message.from_user:
-        t = m.reply_to_message.from_user
-        user(m.chat.id, t.id, t.full_name)
-        owner_id, owner_name = t.id, t.full_name
+    won = c.execute(
+        "SELECT id,name,top_bid FROM auctions WHERE chat_id=? AND status='ended' AND top_bidder=? ORDER BY id DESC",
+        (chat_id, uid)
+    ).fetchall()
+    locked = sum(r[2] for r in leading)
+    free = get_size(chat_id, uid)
+    txt = f"🗂️ کالکشن مزایده‌ی {get_name(chat_id, uid)}\n\n"
+    txt += f"🔥 پیشنهادهای بالای فعلی ({len(leading)}):\n"
+    if leading:
+        for aid, name, bid, last in leading:
+            left = AUCTION_IDLE_SECONDS - (now - last)
+            txt += f"• #{aid} {name} — {bid} سانت (⏳ {fmt_time(left)})\n"
+        txt += f"🔒 سانت بلوکه‌شده تو این پیشنهادها: {locked}\n"
     else:
-        user(m.chat.id, m.from_user.id, m.from_user.full_name)
-        owner_id, owner_name = m.from_user.id, m.from_user.full_name
-    txt, photo_ref, kb = build_bidcol_page(m.chat.id, owner_id, 0, m.from_user.id)
-    if not txt:
-        return await m.reply(
-            f"🔨 {owner_name} الان بالاترین پیشنهاد هیچ مزایده‌ای رو نداره.\n"
-            f"📏 سانت آزاد: {get_size(m.chat.id, owner_id)}\n\n"
-            f"📋 /auctionstatus برای دیدن مزایده‌های فعال"
-        )
-    photo = await resolve_photo(photo_ref) if photo_ref else None
-    try:
-        if photo:
-            sent = await m.bot.send_photo(m.chat.id, photo, caption=txt, reply_markup=kb)
-            if isinstance(photo, BufferedInputFile):
-                cache_photo(photo_ref, sent)
-        else:
-            await m.bot.send_message(m.chat.id, txt, reply_markup=kb)
-    except Exception as e:
-        logger.warning("bidcol photo failed: %s", e)
-        await m.bot.send_message(m.chat.id, txt, reply_markup=kb)
-
-@dp.callback_query(F.data.startswith("bcol:"))
-async def bid_collection_nav(q: CallbackQuery):
-    parts = q.data.split(":")
-    if len(parts) != 4:
-        return await q.answer(NAV_LEGACY_MSG, show_alert=True)
-    _, viewer_id, owner_id, page = parts
-    viewer_id, owner_id, page = int(viewer_id), int(owner_id), int(page)
-    if not await nav_guard(q, viewer_id):
-        return
-    txt, photo_ref, kb = build_bidcol_page(q.message.chat.id, owner_id, page, viewer_id)
-    if not txt:
-        try:
-            await q.message.edit_caption(caption="🔨 دیگه پیشنهاد برتری برای این کاربر نمونده (مزایده‌ها تموم شدن یا کسی بالاتر داده).")
-        except Exception:
-            pass
-        return await q.answer()
-    photo = await resolve_photo(photo_ref) if photo_ref else None
-    try:
-        if photo and q.message.photo:
-            edited = await q.message.edit_media(media=InputMediaPhoto(media=photo, caption=txt), reply_markup=kb)
-            if isinstance(photo, BufferedInputFile) and hasattr(edited, "photo"):
-                cache_photo(photo_ref, edited)
-        elif q.message.photo:
-            await q.message.edit_caption(caption=txt, reply_markup=kb)
-        else:
-            await q.message.edit_text(txt, reply_markup=kb)
-    except TelegramBadRequest as e:
-        if "not modified" not in str(e).lower():
-            return await q.answer(f"خطا: {e}", show_alert=True)
-    except Exception as e:
-        return await q.answer(f"خطا: {e}", show_alert=True)
-    await q.answer()
-
-# ===== لغو پیشنهاد =====
-# - فقط کسی که الان بالاترین پیشنهاد رو داره می‌تونه لغو کنه
-# - کل مبلغ بلوکه‌شده برمی‌گرده و مزایده بدون پیشنهاد می‌مونه
-#   (پیشنهاد نفر قبلی از وقتی ردش کردن برگشته، پس چیزی برای برگردوندن بهش نیست)
-# - تایمر مزایده از اول شروع می‌شه
-def cancel_top_bid(chat_id, uid, aid):
-    """خروجی: (موفق؟، پیام)"""
-    row = c.execute(
-        "SELECT name,top_bid,top_bidder FROM auctions WHERE id=? AND chat_id=? AND status='active'",
-        (aid, chat_id)
-    ).fetchone()
-    if not row:
-        return False, "❌ این مزایده دیگه فعال نیست."
-    name, top_bid, top_bidder = row
-    if top_bidder != uid:
-        return False, "❌ الان بالاترین پیشنهاد مال تو نیست، چیزی برای لغو نداری."
-    c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (top_bid, chat_id, uid))
-    c.execute(
-        "UPDATE auctions SET top_bid=0, top_bidder=0, top_bidder_name='', last_activity=? WHERE id=?",
-        (int(time.time()), aid)
-    )
-    db.commit()
-    return True, (
-        f"✅ پیشنهادت روی «{name}» (مزایده‌ی #{aid}) لغو شد.\n"
-        f"💸 {top_bid} سانت بهت برگشت. سانت فعلی: {get_size(chat_id, uid)}\n"
-        f"🔨 مزایده دوباره بدون پیشنهاده (حداقل پیشنهاد اول: {AUCTION_START_BID} سانت)."
-    )
-
-@dp.message(Command("cancelbid"))
-async def cancel_bid_cmd(m: Message):
-    if m.chat.type == "private":
-        return await m.reply("❌ این دستور رو باید تو گروه بزنی.")
-    uid = m.from_user.id
-    user(m.chat.id, uid, m.from_user.full_name)
-    mine = get_top_bid_auctions(m.chat.id, uid)
-    if not mine:
-        return await m.reply("📭 الان بالاترین پیشنهاد هیچ مزایده‌ای مال تو نیست.")
-    args = [a.lstrip("#") for a in m.text.split()[1:]]
-    mine_ids = {r[0] for r in mine}
-    aid = None
-    if args and args[0].isdigit():
-        aid = int(args[0])
-        if aid not in mine_ids:
-            return await m.reply(f"❌ تو الان بالاترین پیشنهاد مزایده‌ی #{aid} رو نداری.")
-    elif m.reply_to_message:
-        row = c.execute(
-            "SELECT id FROM auctions WHERE chat_id=? AND status='active' AND msg_id=?",
-            (m.chat.id, m.reply_to_message.message_id)
-        ).fetchone()
-        if row and row[0] in mine_ids:
-            aid = row[0]
-    if aid is None:
-        if len(mine) == 1:
-            aid = mine[0][0]
-        else:
-            listing = "\n".join(f"• #{r[0]} — {r[1]} ({r[3]} سانت)" for r in mine)
-            return await m.reply(
-                f"📊 چندتا پیشنهاد برتر داری، مشخص کن کدوم رو لغو کنم:\n{listing}\n\n"
-                f"مثال: /cancelbid {mine[0][0]}\n(یا از دکمه‌ی ❌ تو /bidcol استفاده کن)"
-            )
-    _ok, msg = cancel_top_bid(m.chat.id, uid, aid)
-    await m.reply(msg)
-
-@dp.callback_query(F.data.startswith("cbid:"))
-async def cancel_bid_btn(q: CallbackQuery):
-    _, owner_id, aid = q.data.split(":")
-    owner_id, aid = int(owner_id), int(aid)
-    if q.from_user.id != owner_id:
-        return await q.answer("❌ این پیشنهاد مال تو نیست!", show_alert=True)
-    ok, msg = cancel_top_bid(q.message.chat.id, owner_id, aid)
-    if not ok:
-        return await q.answer(msg, show_alert=True)
-    await q.answer("✅ پیشنهاد لغو شد و سانتت برگشت.", show_alert=True)
-    await q.message.reply(msg)
-    txt, photo_ref, kb = build_bidcol_page(q.message.chat.id, owner_id, 0, owner_id)
-    try:
-        if not txt:
-            txt = f"🔨 دیگه بالاترین پیشنهاد هیچ مزایده‌ای مال تو نیست.\n📏 سانت آزاد: {get_size(q.message.chat.id, owner_id)}"
-            if q.message.photo:
-                await q.message.edit_caption(caption=txt, reply_markup=None)
-            else:
-                await q.message.edit_text(txt, reply_markup=None)
-            return
-        photo = await resolve_photo(photo_ref) if photo_ref else None
-        if photo and q.message.photo:
-            await q.message.edit_media(media=InputMediaPhoto(media=photo, caption=txt), reply_markup=kb)
-        elif q.message.photo:
-            await q.message.edit_caption(caption=txt, reply_markup=kb)
-        else:
-            await q.message.edit_text(txt, reply_markup=kb)
-    except Exception as e:
-        logger.warning("cancel_bid_btn refresh failed: %s", e)
-
-# ===== کالکشن مزایده‌های فعال (همه‌ی مزایده‌های در جریان، با عکس) =====
-def build_aucol_page(chat_id, page, viewer_id):
-    """خروجی: (متن، file_id عکس، کیبورد) یا (None, None, None) اگه مزایده‌ی فعالی نباشه."""
-    rows = get_active_auctions(chat_id)
-    if not rows:
-        return None, None, None
-    page = max(0, min(page, len(rows) - 1))
-    aid, name, photo, top_bid, top_bidder, top_name, last, _mid = rows[page]
-    if top_bidder:
-        bid_txt = f"{top_bid} سانت — 👑 {top_name}"
-        min_next = top_bid + AUCTION_MIN_INCREMENT
+        txt += "هیچ‌کدوم\n"
+    txt += f"💵 سانت آزاد و باقی‌مونده‌ت: {free}\n\n"
+    txt += f"🏆 مزایده‌هایی که بردی ({len(won)}):\n"
+    if won:
+        for aid, name, bid in won[:AUCTION_COLLECTION_MAX_LINES]:
+            txt += f"• #{aid} {name} — {bid} سانت\n"
+        if len(won) > AUCTION_COLLECTION_MAX_LINES:
+            txt += f"... و {len(won) - AUCTION_COLLECTION_MAX_LINES} تای دیگه\n"
+        txt += f"💸 جمع پولی که تا الان خرج بردها شده: {sum(r[2] for r in won)} سانت"
     else:
-        bid_txt = "هنوز پیشنهادی نیومده"
-        min_next = AUCTION_START_BID
-    left = AUCTION_IDLE_SECONDS - (int(time.time()) - last)
-    txt = (
-        f"🔨 مزایده‌های فعال — {page+1}/{len(rows)}\n\n"
-        f"🎁 {name}\n"
-        f"🆔 مزایده‌ی #{aid}\n"
-        f"💰 بالاترین پیشنهاد: {bid_txt}\n"
-        f"📈 حداقل پیشنهاد بعدی: {min_next} سانت\n"
-        f"⏳ {fmt_time(left)} تا پایان (اگه پیشنهاد بالاتری نیاد)\n\n"
-        f"🔨 /bid {aid} {min_next}"
-    )
-    buttons = []
-    if page > 0:
-        buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"acol:{viewer_id}:{page-1}"))
-    if page < len(rows) - 1:
-        buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"acol:{viewer_id}:{page+1}"))
-    kb = InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
-    return txt, photo, kb
+        txt += "هنوز هیچ مزایده‌ای نبردی"
+    return txt
 
-@dp.message(Command("aucol"))
-async def auction_collection(m: Message):
-    txt, photo_ref, kb = build_aucol_page(m.chat.id, 0, m.from_user.id)
-    if not txt:
-        return await m.reply("📭 الان هیچ مزایده‌ای در جریان نیست.")
-    photo = await resolve_photo(photo_ref) if photo_ref else None
-    try:
-        if photo:
-            sent = await m.bot.send_photo(m.chat.id, photo, caption=txt, reply_markup=kb)
-            if isinstance(photo, BufferedInputFile):
-                cache_photo(photo_ref, sent)
-        else:
-            await m.bot.send_message(m.chat.id, txt, reply_markup=kb)
-    except Exception as e:
-        logger.warning("aucol photo failed: %s", e)
-        await m.bot.send_message(m.chat.id, txt, reply_markup=kb)
-
-@dp.callback_query(F.data.startswith("acol:"))
-async def auction_collection_nav(q: CallbackQuery):
-    parts = q.data.split(":")
-    if len(parts) != 3:
-        return await q.answer(NAV_LEGACY_MSG, show_alert=True)
-    viewer_id, page = int(parts[1]), int(parts[2])
-    if not await nav_guard(q, viewer_id):
-        return
-    txt, photo_ref, kb = build_aucol_page(q.message.chat.id, page, viewer_id)
-    if not txt:
-        try:
-            if q.message.photo:
-                await q.message.edit_caption(caption="📭 دیگه مزایده‌ی فعالی نمونده.", reply_markup=None)
-            else:
-                await q.message.edit_text("📭 دیگه مزایده‌ی فعالی نمونده.", reply_markup=None)
-        except Exception:
-            pass
-        return await q.answer()
-    photo = await resolve_photo(photo_ref) if photo_ref else None
-    try:
-        if photo and q.message.photo:
-            edited = await q.message.edit_media(media=InputMediaPhoto(media=photo, caption=txt), reply_markup=kb)
-            if isinstance(photo, BufferedInputFile) and hasattr(edited, "photo"):
-                cache_photo(photo_ref, edited)
-        elif q.message.photo:
-            await q.message.edit_caption(caption=txt, reply_markup=kb)
-        else:
-            await q.message.edit_text(txt, reply_markup=kb)
-    except TelegramBadRequest as e:
-        if "not modified" not in str(e).lower():
-            return await q.answer(f"خطا: {e}", show_alert=True)
-    except Exception as e:
-        return await q.answer(f"خطا: {e}", show_alert=True)
-    await q.answer()
+@dp.message(Command("myauctions"))
+async def my_auctions(m: Message):
+    if m.reply_to_message and m.reply_to_message.from_user and not m.reply_to_message.from_user.is_bot:
+        target = m.reply_to_message.from_user.id
+    else:
+        target = m.from_user.id
+        user(m.chat.id, target, m.from_user.full_name)
+    await m.reply(build_auction_collection_text(m.chat.id, target))
 
 @dp.message(Command("endauction"))
 async def auction_end(m: Message):
@@ -2668,6 +2088,98 @@ async def auction_end(m: Message):
     if err:
         return await m.reply(err + "\n\nمثال: /endauction [شماره]  یا  /endauction [شماره] cancel")
     await finalize_auction(m.bot, a[0], cancel=cancel)
+
+# ===== بکاپ و بازگردانی دیتابیس (برای جابه‌جایی بین اکانت‌ها/سرورها) =====
+TG_UPLOAD_LIMIT = 49 * 1024 * 1024     # سقف آپلود فایل توسط ربات
+TG_DOWNLOAD_LIMIT = 20 * 1024 * 1024   # سقف دانلود فایل توسط ربات
+
+def make_db_snapshot(path):
+    """یه کپی کاملاً هماهنگ (consistent) از دیتابیس زنده می‌سازه، حتی وقتی ربات داره کار می‌کنه."""
+    db.commit()
+    dst = sqlite3.connect(path)
+    try:
+        db.backup(dst)
+    finally:
+        dst.close()
+
+@dp.message(Command("backupdb"))
+async def backup_db(m: Message):
+    if m.from_user.id not in ADMIN_IDS:
+        return await m.reply("❌ دسترسی ندارید!")
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    tmp = os.path.join(tempfile.gettempdir(), f"backup_{stamp}.db")
+    try:
+        make_db_snapshot(tmp)
+        size = os.path.getsize(tmp)
+        if size > TG_UPLOAD_LIMIT:
+            return await m.reply(f"❌ فایل دیتابیس ({size // (1024*1024)} مگابایت) از سقف آپلود تلگرام بزرگ‌تره. از Railway CLI استفاده کن:\nrailway volume files download")
+        users_n, chats_n = c.execute("SELECT COUNT(*), COUNT(DISTINCT chat_id) FROM users").fetchone()
+        # همیشه تو پیوی خود ادمین می‌فرسته، نه تو گروه (دیتابیس اطلاعات همه رو داره)
+        await m.bot.send_document(
+            m.from_user.id,
+            FSInputFile(tmp, filename=f"database_backup_{stamp}.db"),
+            caption=f"💾 بکاپ دیتابیس\n👥 {users_n} کاربر | 💬 {chats_n} گروه\n\nبرای بازگردانی: همین فایل رو تو پیوی ربات بفرست با کپشن:\n/restoredb CONFIRM"
+        )
+    except (TelegramForbiddenError, TelegramBadRequest):
+        return await m.reply("❌ نتونستم تو پیوی بهت بفرستم. اول ربات رو تو چت خصوصی استارت کن، بعد دوباره امتحان کن.")
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    if m.chat.type != "private":
+        await m.reply("📩 فایل بکاپ رو برات تو پیوی فرستادم.")
+
+@dp.message(F.document, F.caption.startswith("/restoredb"))
+@dp.message(Command("restoredb"))
+async def restore_db(m: Message):
+    if m.from_user.id not in ADMIN_IDS:
+        return await m.reply("❌ دسترسی ندارید!")
+    if m.chat.type != "private":
+        return await m.reply("❌ بازگردانی رو فقط تو پیوی ربات انجام بده، نه تو گروه.")
+    text = (m.text or m.caption or "").split()
+    doc = m.document or (m.reply_to_message.document if m.reply_to_message and m.reply_to_message.document else None)
+    if "CONFIRM" not in text or not doc:
+        return await m.reply(
+            "⚠️ این کار کل دیتابیس فعلی (همه‌ی گروه‌ها) رو با فایل بکاپ جایگزین می‌کنه.\n\n"
+            "فایل بکاپ (.db) رو بفرست و تو کپشنش بنویس:\n/restoredb CONFIRM\n"
+            "(یا روی فایل بکاپ ریپلای کن و همین رو بنویس)"
+        )
+    if doc.file_size and doc.file_size > TG_DOWNLOAD_LIMIT:
+        return await m.reply("❌ این فایل از سقف دانلود ربات (۲۰ مگابایت) بزرگ‌تره.")
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    tmp = os.path.join(tempfile.gettempdir(), f"restore_{stamp}.db")
+    try:
+        await m.bot.download(doc, destination=tmp)
+        try:
+            chk = sqlite3.connect(tmp)
+            integrity = chk.execute("PRAGMA integrity_check").fetchone()[0]
+            has_users = chk.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'").fetchone() is not None
+            chk.close()
+        except sqlite3.DatabaseError:
+            integrity, has_users = "bad", False
+        if integrity != "ok" or not has_users:
+            return await m.reply("❌ این فایل یه دیتابیس سالمِ این بات نیست. چیزی تغییر نکرد.")
+        # قبل از جایگزینی، از دیتابیس فعلی یه کپی ایمنی کنار فایل اصلی می‌ذاره
+        safety = f"{DB}.pre_restore_{stamp}"
+        make_db_snapshot(safety)
+        db.commit()
+        src = sqlite3.connect(tmp)
+        try:
+            src.backup(db)
+        finally:
+            src.close()
+        db.commit()
+        users_n, chats_n = c.execute("SELECT COUNT(*), COUNT(DISTINCT chat_id) FROM users").fetchone()
+        await m.reply(
+            f"✅ دیتابیس بازگردانی شد.\n👥 {users_n} کاربر | 💬 {chats_n} گروه\n\n"
+            f"🛟 کپی ایمنیِ دیتابیس قبلی: {os.path.basename(safety)}\n\n"
+            "اگه این بکاپ از یه نسخه‌ی قدیمی‌تر کد بوده، یه بار سرویس رو ری‌استارت/ری‌دیپلوی کن تا جدول‌های جدید ساخته بشن."
+        )
+    except Exception:
+        logger.exception("restore_db failed")
+        await m.reply("❌ بازگردانی با خطا مواجه شد. دیتابیس فعلی دست‌نخورده موند (جزئیات تو لاگ).")
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 @dp.message(Command("addcm"))
 async def addcm(m:Message):
@@ -2725,7 +2237,7 @@ async def reset_group(m: Message):
         "game_loans", "mafia_battles", "mafia2_battles", "collections",
         "company_rounds", "company_options", "company_investments",
         "company_participants", "owned_companies",
-        "farm_tiles", "farm_inventory", "farm_records", "auctions", "climb_games", "blackjack_games", "wealth_tax", "activity", "play_log",
+        "farm_tiles", "farm_inventory", "farm_records", "auctions",
     ):
         c.execute(f"DELETE FROM {table} WHERE chat_id=?", (chat_id,))
     # جدول‌هایی که فقط از طریق battle_id به گروه وصلن
@@ -3292,702 +2804,6 @@ async def company_dividend_loop(bot):
                 pass
 # ================== پایان کمپانی کیر ==================
 
-# ===== خرید و دیدن توکن =====
-@dp.message(Command("token", "tokens"))
-async def token_info(m: Message):
-    user(m.chat.id, m.from_user.id, m.from_user.full_name)
-    size_cm = get_size(m.chat.id, m.from_user.id)
-    await m.reply(
-        f"🎟 توکن‌های تو: {get_tokens(m.chat.id, m.from_user.id)}\n\n"
-        f"💰 قیمت هر توکن الان: {token_price(size_cm)} سانت ({int(TOKEN_PRICE_PCT*100)}٪ سایزت — سایزت الان {size_cm} سانته)\n"
-        f"🛒 /buytoken [تعداد] — خرید (حداکثر {TOKEN_MAX_BUY} تا تو هر خرید)\n\n"
-        "🎮 هر دست /box و /climb و /bj ۱ توکن می‌خواد.\n"
-        f"⚔️ برنده‌ی دوئل با {int(DUEL_TOKEN_CHANCE*100)}٪ شانس یه توکن هم می‌گیره."
-    )
-
-@dp.message(Command("buytoken", "buytokens"))
-async def buy_token(m: Message):
-    uid, chat_id = m.from_user.id, m.chat.id
-    user(chat_id, uid, m.from_user.full_name)
-    args = m.text.split()[1:]
-    if not args:
-        n = 1
-    elif args[0].isdigit():
-        n = int(args[0])
-    else:
-        return await m.reply("استفاده: /buytoken [تعداد]  (مثلاً /buytoken 3)")
-    if n < 1 or n > TOKEN_MAX_BUY:
-        return await m.reply(f"❌ تعداد باید بین ۱ تا {TOKEN_MAX_BUY} باشه.")
-    size_cm = get_size(chat_id, uid)
-    price = token_price(size_cm)
-    total = price * n
-    if size_cm < total:
-        return await m.reply(f"❌ سانت کافی نداری. {n} توکن = {total} سانت (هر توکن {price}) ولی سایزت {size_cm} سانته.")
-    c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (total, chat_id, uid))
-    db.commit()
-    add_tokens(chat_id, uid, n)
-    await m.reply(
-        f"✅ {n} توکن خریدی!\n"
-        f"💸 {total} سانت کم شد (هر توکن {price} سانت)\n"
-        f"🎟 توکن‌هات: {get_tokens(chat_id, uid)} | 📏 سایزت: {get_size(chat_id, uid)}"
-    )
-
-# ===== مینی‌گیم: جعبه‌ی شانس 🎁 =====
-# - /box [مبلغ] → ۴ تا جعبه‌ی بسته میاد؛ یکی رو انتخاب می‌کنی
-# - تو هر دور یه جعبه‌ی 💎 (۳ برابر شرط)، یه 🔄 (شرط برمی‌گرده) و دوتا 💣 (شرط می‌سوزه) هست
-# - میانگین برد = ۱ برابر شرط (نه تورم می‌سازه نه سانت می‌خوره)
-# - سانت فقط لحظه‌ی انتخاب کم/زیاد می‌شه؛ اگه بازی نیمه‌کاره بمونه هیچی از دست نمیری
-BOX_MAX_BET = 100
-BOX_PAYOUTS = [0, 0, 1, 3]
-BOX_TTL = 120
-BOX_EMOJI = {0: "💣", 1: "🔄", 3: "💎"}
-BOX_GAMES = {}  # gid -> {chat, uid, bet, ts}
-
-@dp.message(Command("box"))
-async def box_start(m: Message):
-    if m.chat.type == "private":
-        return await m.reply("❌ این بازی رو باید تو گروه بزنی.")
-    args = m.text.split()[1:]
-    if not args or not args[0].isdigit():
-        return await m.reply(f"🎁 جعبه‌ی شانس\n\nاستفاده: /box [مبلغ شرط]\n(حداکثر {BOX_MAX_BET} سانت)\n\n"
-                             "۴ تا جعبه هست: 💎 (۳ برابر) | 🔄 (شرطت برمی‌گرده) | 💣💣 (شرط می‌سوزه)\n\n🎟 ورودی: ۱ توکن (/buytoken)")
-    bet = int(args[0])
-    uid = m.from_user.id
-    user(m.chat.id, uid, m.from_user.full_name)
-    if bet < 1 or bet > BOX_MAX_BET:
-        return await m.reply(f"❌ شرط باید بین ۱ تا {BOX_MAX_BET} سانت باشه.")
-    if get_size(m.chat.id, uid) < bet:
-        return await m.reply("❌ سانت کافی نداری.")
-    if not take_token(m.chat.id, uid):
-        return await m.reply(no_token_text(m.chat.id, uid))
-    log_play(m.chat.id, uid, "game")
-    now = int(time.time())
-    for k in [k for k, g in BOX_GAMES.items() if now - g["ts"] > BOX_TTL]:
-        BOX_GAMES.pop(k, None)
-    gid = str(random.randint(100000, 999999))
-    while gid in BOX_GAMES:
-        gid = str(random.randint(100000, 999999))
-    BOX_GAMES[gid] = {"chat": m.chat.id, "uid": uid, "bet": bet, "ts": now}
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🎁", callback_data=f"box:{uid}:{gid}:{i}") for i in range(len(BOX_PAYOUTS))
-    ]])
-    await m.reply(
-        f"🎁 جعبه‌ی شانس — {m.from_user.full_name}\n"
-        f"💰 شرط: {bet} سانت | 🎟 ۱ توکن خرج شد (باقی: {get_tokens(m.chat.id, uid)})\n\n"
-        f"یه جعبه انتخاب کن! ({BOX_TTL//60} دقیقه وقت داری)\n"
-        f"💎 ×۳ | 🔄 ×۱ | 💣 ×۰ (دوتا)",
-        reply_markup=kb
-    )
-
-@dp.callback_query(F.data.startswith("box:"))
-async def box_pick(q: CallbackQuery):
-    parts = q.data.split(":")
-    if len(parts) != 4:
-        return await q.answer(NAV_LEGACY_MSG, show_alert=True)
-    _, viewer_id, gid, idx = parts
-    if not await nav_guard(q, int(viewer_id)):
-        return
-    g = BOX_GAMES.pop(gid, None)  # pop = هر بازی فقط یه بار قابل انتخابه
-    if not g or g["chat"] != q.message.chat.id:
-        return await q.answer("⌛️ این بازی تموم شده یا منقضی شده.", show_alert=True)
-    uid, bet = g["uid"], g["bet"]
-    if int(time.time()) - g["ts"] > BOX_TTL:
-        await q.message.edit_text("⌛️ وقت انتخابت تموم شد؛ چیزی کم نشد. دوباره /box بزن.", reply_markup=None)
-        return await q.answer()
-    if get_size(q.message.chat.id, uid) < bet:
-        await q.message.edit_text("❌ الان سانت کافی برای این شرط نداری؛ بازی لغو شد.", reply_markup=None)
-        return await q.answer()
-    picked = int(idx)
-    boxes = BOX_PAYOUTS[:]
-    random.shuffle(boxes)
-    mult = boxes[picked]
-    delta = bet * mult - bet
-    c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (delta, q.message.chat.id, uid))
-    db.commit()
-    row = " ".join(f"[{BOX_EMOJI[b]}]" if i == picked else BOX_EMOJI[b] for i, b in enumerate(boxes))
-    if mult == 3:
-        res = f"💎 جکپات! +{delta} سانت"
-    elif mult == 1:
-        res = "🔄 شرطت برگشت، نه بردی نه باختی."
-    else:
-        res = f"💣 بوووم! {bet} سانت سوخت."
-    await q.message.edit_text(
-        f"🎁 جعبه‌ی شانس — {get_name(q.message.chat.id, uid)}\n\n{row}\n\n{res}\n"
-        f"📏 سانت فعلی: {get_size(q.message.chat.id, uid)}",
-        reply_markup=None
-    )
-    await q.answer()
-
-# ===== مینی‌گیم: نردبان 🪜 =====
-# - /climb [مبلغ] → شرط رو می‌ذاری و از پایین نردبان شروع می‌کنی
-# - هر بار «برو بالاتر» رو بزنی ۷۵٪ شانس داری یه پله بری بالا و ضریبت بزرگ‌تر بشه؛ ۲۵٪ می‌افتی و شرط می‌سوزه
-# - هر لحظه می‌تونی «برداشت» رو بزنی و پول رو برداری؛ رسیدن به پله‌ی ۶ خودکار برداشت می‌شه
-# - ضریب هر پله = (۱/۰.۷۵)^پله، پس میانگین برد ≈ ۱ برابر شرطه (اقتصاد رو خراب نمی‌کنه)
-# - شرط همون اول کم می‌شه (تا با چندتا بازی همزمان نشه تقلب کرد)؛ ذخیره تو دیتابیسه، پس با ریستارت ربات هم گم نمی‌شه
-# - اگه ۳ دقیقه هیچ حرکتی نکنی، بازی خودکار برداشت می‌شه (پله‌ی ۰ = شرط برمی‌گرده)
-CLIMB_MAX_BET = 100
-CLIMB_P = 0.75
-CLIMB_MAX_STEPS = 6
-CLIMB_TTL = 180
-
-c.execute("""CREATE TABLE IF NOT EXISTS climb_games(
-    chat_id INTEGER,
-    user_id INTEGER,
-    bet INTEGER,
-    step INTEGER DEFAULT 0,
-    ts INTEGER,
-    msg_id INTEGER DEFAULT 0,
-    PRIMARY KEY(chat_id, user_id)
-)""")
-db.commit()
-
-def climb_mult(step):
-    return (1 / CLIMB_P) ** step
-
-def climb_payout(bet, step):
-    return bet if step <= 0 else int(bet * climb_mult(step))
-
-def climb_load(chat_id, uid):
-    return c.execute("SELECT bet,step,ts,msg_id FROM climb_games WHERE chat_id=? AND user_id=?", (chat_id, uid)).fetchone()
-
-def climb_cash(chat_id, uid, bet, step):
-    payout = climb_payout(bet, step)
-    c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (payout, chat_id, uid))
-    c.execute("DELETE FROM climb_games WHERE chat_id=? AND user_id=?", (chat_id, uid))
-    db.commit()
-    return payout
-
-def climb_view(name, bet, step, viewer_id):
-    lines = []
-    for i in range(CLIMB_MAX_STEPS, 0, -1):
-        mark = "🧗" if i == step else ("✅" if i < step else "▫️")
-        lines.append(f"{mark} پله {i}: ×{climb_mult(i):.1f}")
-    if step == 0:
-        lines.append("🧗 پایین نردبان")
-    txt = (
-        f"🪜 نردبان — {name}\n"
-        f"💰 شرط: {bet} سانت\n\n"
-        + "\n".join(lines) +
-        f"\n\n🎯 شانس هر پله: {int(CLIMB_P*100)}٪"
-    )
-    rows = [[InlineKeyboardButton(text="⬆️ برو بالاتر", callback_data=f"clb:{viewer_id}:up")]]
-    if step >= 1:
-        rows.append([InlineKeyboardButton(
-            text=f"💰 برداشت ({climb_payout(bet, step)} سانت)", callback_data=f"clb:{viewer_id}:cash")])
-    return txt, InlineKeyboardMarkup(inline_keyboard=rows)
-
-@dp.message(Command("climb"))
-async def climb_start(m: Message):
-    if m.chat.type == "private":
-        return await m.reply("❌ این بازی رو باید تو گروه بزنی.")
-    args = m.text.split()[1:]
-    if not args or not args[0].isdigit():
-        return await m.reply(
-            f"🪜 نردبان\n\nاستفاده: /climb [مبلغ شرط]\n(حداکثر {CLIMB_MAX_BET} سانت)\n\n"
-            f"هر پله {int(CLIMB_P*100)}٪ شانس داره و ضریبت بزرگ‌تر می‌شه، ولی با ۲۵٪ می‌افتی و همه‌چی می‌سوزه. "
-            f"هر وقت خواستی «برداشت» رو بزن!\n\n🎟 ورودی: ۱ توکن (/buytoken)"
-        )
-    bet = int(args[0])
-    uid, chat_id = m.from_user.id, m.chat.id
-    user(chat_id, uid, m.from_user.full_name)
-    now = int(time.time())
-    g = climb_load(chat_id, uid)
-    if g:
-        if now - g[2] > CLIMB_TTL:
-            payout = climb_cash(chat_id, uid, g[0], g[1])
-            await m.reply(f"⌛️ نردبان قبلیت منقضی شد و خودکار برداشت شد: {payout} سانت.")
-        else:
-            return await m.reply("❌ یه نردبان نیمه‌کاره داری! اول همون رو تموم کن.")
-    if bet < 1 or bet > CLIMB_MAX_BET:
-        return await m.reply(f"❌ شرط باید بین ۱ تا {CLIMB_MAX_BET} سانت باشه.")
-    if get_size(chat_id, uid) < bet:
-        return await m.reply("❌ سانت کافی نداری.")
-    if not take_token(chat_id, uid):
-        return await m.reply(no_token_text(chat_id, uid))
-    log_play(chat_id, uid, "game")
-    c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (bet, chat_id, uid))
-    c.execute("INSERT OR REPLACE INTO climb_games(chat_id,user_id,bet,step,ts,msg_id) VALUES(?,?,?,0,?,0)", (chat_id, uid, bet, now))
-    db.commit()
-    txt, kb = climb_view(m.from_user.full_name, bet, 0, uid)
-    try:
-        sent = await m.reply(txt, reply_markup=kb)
-    except Exception:
-        climb_cash(chat_id, uid, bet, 0)  # ارسال خراب شد: شرط برگرده
-        add_tokens(chat_id, uid, 1)       # توکن هم برگرده
-        raise
-    c.execute("UPDATE climb_games SET msg_id=? WHERE chat_id=? AND user_id=?", (sent.message_id, chat_id, uid))
-    db.commit()
-
-@dp.callback_query(F.data.startswith("clb:"))
-async def climb_press(q: CallbackQuery):
-    parts = q.data.split(":")
-    if len(parts) != 3:
-        return await q.answer(NAV_LEGACY_MSG, show_alert=True)
-    _, viewer_id, action = parts
-    viewer_id = int(viewer_id)
-    if not await nav_guard(q, viewer_id):
-        return
-    chat_id = q.message.chat.id
-    g = climb_load(chat_id, viewer_id)
-    if not g or g[3] != q.message.message_id:
-        return await q.answer("⌛️ این بازی تموم شده.", show_alert=True)
-    bet, step, ts, _mid = g
-    name = get_name(chat_id, viewer_id)
-    if int(time.time()) - ts > CLIMB_TTL:
-        payout = climb_cash(chat_id, viewer_id, bet, step)
-        await q.message.edit_text(
-            f"⌛️ نردبان — {name}\n\nوقتت تموم شد و خودکار برداشت شد: {payout} سانت\n📏 سانت فعلی: {get_size(chat_id, viewer_id)}",
-            reply_markup=None)
-        return await q.answer()
-    if action == "cash":
-        if step < 1:
-            return await q.answer("اول یه پله برو بالا!", show_alert=True)
-        payout = climb_cash(chat_id, viewer_id, bet, step)
-        await q.message.edit_text(
-            f"🪜 نردبان — {name}\n\n💰 برداشت کردی! {payout} سانت (پله‌ی {step}، ×{climb_mult(step):.1f})\n"
-            f"{'📈 سود' if payout > bet else '📉 تغییر'}: {payout - bet:+d} سانت\n"
-            f"📏 سانت فعلی: {get_size(chat_id, viewer_id)}",
-            reply_markup=None)
-        return await q.answer()
-    if action != "up":
-        return await q.answer()
-    if random.random() < CLIMB_P:
-        step += 1
-        if step >= CLIMB_MAX_STEPS:
-            payout = climb_cash(chat_id, viewer_id, bet, step)
-            await q.message.edit_text(
-                f"🪜 نردبان — {name}\n\n🏆 به قله رسیدی! (×{climb_mult(step):.1f})\n"
-                f"💰 {payout} سانت برداشت شد ({payout - bet:+d})\n"
-                f"📏 سانت فعلی: {get_size(chat_id, viewer_id)}",
-                reply_markup=None)
-            return await q.answer("🏆 قله!")
-        c.execute("UPDATE climb_games SET step=?, ts=? WHERE chat_id=? AND user_id=?", (step, int(time.time()), chat_id, viewer_id))
-        db.commit()
-        txt, kb = climb_view(name, bet, step, viewer_id)
-        await q.message.edit_text(txt, reply_markup=kb)
-        return await q.answer(f"⬆️ پله‌ی {step}!")
-    c.execute("DELETE FROM climb_games WHERE chat_id=? AND user_id=?", (chat_id, viewer_id))
-    db.commit()
-    await q.message.edit_text(
-        f"🪜 نردبان — {name}\n\n💥 از پله‌ی {step + 1} افتادی! {bet} سانت سوخت.\n"
-        f"📏 سانت فعلی: {get_size(chat_id, viewer_id)}",
-        reply_markup=None)
-    await q.answer("💥 افتادی!")
-
-# ===== بازی کارتی: بلک‌جک (۲۱) 🃏 =====
-# - /bj [مبلغ] → دو کارت می‌گیری، دیلر هم دو کارت (یکیش مخفی)
-# - «🃏 کارت بگیر» یا «✋ بایست»؛ نزدیک‌تر به ۲۱ برنده‌ست، بیشتر از ۲۱ = باخت
-# - دیلر تا ۱۷ کارت می‌گیره و رو ۱۷ می‌ایسته
-# - برد = ۲ برابر شرط | بلک‌جک (A + ده‌تایی تو دو کارت اول) = ۲.۵ برابر | مساوی = شرط برمی‌گرده
-# - شرط همون اول کم می‌شه و بازی تو دیتابیسه (با ریستارت ربات گم نمی‌شه)؛ ۳ دقیقه بی‌حرکتی = خودکار «بایست»
-# - ساده‌ست: دابل و اسپلیت نداره
-BJ_MAX_BET = 100
-BJ_TTL = 180
-BJ_RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
-BJ_SUITS = ["♠", "♥", "♦", "♣"]
-
-c.execute("""CREATE TABLE IF NOT EXISTS blackjack_games(
-    chat_id INTEGER,
-    user_id INTEGER,
-    bet INTEGER,
-    player TEXT,
-    dealer TEXT,
-    deck TEXT,
-    ts INTEGER,
-    msg_id INTEGER DEFAULT 0,
-    PRIMARY KEY(chat_id, user_id)
-)""")
-db.commit()
-
-def bj_new_deck():
-    deck = [r + s_ for r in BJ_RANKS for s_ in BJ_SUITS]
-    random.shuffle(deck)
-    return deck
-
-def bj_val(hand):
-    total, aces = 0, 0
-    for card in hand:
-        r = card[:-1]
-        if r == "A":
-            total += 11
-            aces += 1
-        elif r in ("J", "Q", "K"):
-            total += 10
-        else:
-            total += int(r)
-    while total > 21 and aces:
-        total -= 10
-        aces -= 1
-    return total
-
-def bj_is_blackjack(hand):
-    return len(hand) == 2 and bj_val(hand) == 21
-
-def bj_load(chat_id, uid):
-    row = c.execute(
-        "SELECT bet,player,dealer,deck,ts,msg_id FROM blackjack_games WHERE chat_id=? AND user_id=?",
-        (chat_id, uid)
-    ).fetchone()
-    if not row:
-        return None
-    bet, player, dealer, deck, ts, msg_id = row
-    return {"bet": bet, "player": player.split(","), "dealer": dealer.split(","),
-            "deck": deck.split(",") if deck else [], "ts": ts, "msg_id": msg_id}
-
-def bj_save(chat_id, uid, g):
-    c.execute(
-        "UPDATE blackjack_games SET player=?, dealer=?, deck=?, ts=? WHERE chat_id=? AND user_id=?",
-        (",".join(g["player"]), ",".join(g["dealer"]), ",".join(g["deck"]), int(time.time()), chat_id, uid)
-    )
-    db.commit()
-
-def bj_settle(chat_id, uid, payout):
-    """پول برنده رو بده و بازی رو پاک کن."""
-    if payout:
-        c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (payout, chat_id, uid))
-    c.execute("DELETE FROM blackjack_games WHERE chat_id=? AND user_id=?", (chat_id, uid))
-    db.commit()
-
-def bj_render(name, g, reveal, note=""):
-    pv = bj_val(g["player"])
-    if reveal:
-        dealer_txt = f"{' '.join(g['dealer'])} ({bj_val(g['dealer'])})"
-    else:
-        dealer_txt = f"{g['dealer'][0]} 🂠"
-    txt = (
-        f"🃏 بلک‌جک — {name}\n"
-        f"💰 شرط: {g['bet']} سانت\n\n"
-        f"🧑 دست تو: {' '.join(g['player'])} ({pv})\n"
-        f"🎩 دست دیلر: {dealer_txt}"
-    )
-    if note:
-        txt += f"\n\n{note}"
-    return txt
-
-def bj_kb(viewer_id):
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🃏 کارت بگیر", callback_data=f"bjk:{viewer_id}:hit"),
-        InlineKeyboardButton(text="✋ بایست", callback_data=f"bjk:{viewer_id}:stand"),
-    ]])
-
-def bj_finish(chat_id, uid, g, name):
-    """دیلر بازی می‌کنه، نتیجه حساب و پرداخت می‌شه. خروجی: متن نهایی."""
-    bet = g["bet"]
-    pv = bj_val(g["player"])
-    while bj_val(g["dealer"]) < 17:
-        g["dealer"].append(g["deck"].pop())
-    dv = bj_val(g["dealer"])
-    if dv > 21:
-        payout, note = bet * 2, f"🏆 دیلر بیشتر از ۲۱ شد! بردی: +{bet} سانت"
-    elif pv > dv:
-        payout, note = bet * 2, f"🏆 بردی! +{bet} سانت"
-    elif pv == dv:
-        payout, note = bet, "🤝 مساوی — شرطت برگشت."
-    else:
-        payout, note = 0, f"💥 باختی! {bet} سانت سوخت."
-    bj_settle(chat_id, uid, payout)
-    return bj_render(name, g, True, note + f"\n📏 سانت فعلی: {get_size(chat_id, uid)}")
-
-@dp.message(Command("bj", "blackjack"))
-async def bj_start(m: Message):
-    if m.chat.type == "private":
-        return await m.reply("❌ این بازی رو باید تو گروه بزنی.")
-    args = m.text.split()[1:]
-    if not args or not args[0].isdigit():
-        return await m.reply(
-            f"🃏 بلک‌جک (۲۱)\n\nاستفاده: /bj [مبلغ شرط]\n(حداکثر {BJ_MAX_BET} سانت)\n\n"
-            "به ۲۱ نزدیک شو ولی ردش نکن! دیلر تا ۱۷ کارت می‌گیره.\n"
-            "برد ×۲ | بلک‌جک ×۲.۵ | مساوی = شرطت برمی‌گرده\n\n🎟 ورودی: ۱ توکن (/buytoken)"
-        )
-    bet = int(args[0])
-    uid, chat_id = m.from_user.id, m.chat.id
-    name = m.from_user.full_name
-    user(chat_id, uid, name)
-    g = bj_load(chat_id, uid)
-    if g:
-        if int(time.time()) - g["ts"] > BJ_TTL:
-            res = bj_finish(chat_id, uid, g, name)
-            await m.reply("⌛️ بازی قبلیت منقضی شد و خودکار «بایست» زده شد:\n\n" + res)
-        else:
-            return await m.reply("❌ یه دست نیمه‌کاره داری! اول همون رو تموم کن.")
-    if bet < 1 or bet > BJ_MAX_BET:
-        return await m.reply(f"❌ شرط باید بین ۱ تا {BJ_MAX_BET} سانت باشه.")
-    if get_size(chat_id, uid) < bet:
-        return await m.reply("❌ سانت کافی نداری.")
-    if not take_token(chat_id, uid):
-        return await m.reply(no_token_text(chat_id, uid))
-    log_play(chat_id, uid, "game")
-    deck = bj_new_deck()
-    player = [deck.pop(), deck.pop()]
-    dealer = [deck.pop(), deck.pop()]
-    c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (bet, chat_id, uid))
-    c.execute(
-        "INSERT OR REPLACE INTO blackjack_games(chat_id,user_id,bet,player,dealer,deck,ts,msg_id) VALUES(?,?,?,?,?,?,?,0)",
-        (chat_id, uid, bet, ",".join(player), ",".join(dealer), ",".join(deck), int(time.time()))
-    )
-    db.commit()
-    g = {"bet": bet, "player": player, "dealer": dealer, "deck": deck}
-    # بلک‌جک طبیعی (یا دیلر)، همون اول تموم می‌شه
-    if bj_is_blackjack(player) or bj_is_blackjack(dealer):
-        if bj_is_blackjack(player) and bj_is_blackjack(dealer):
-            payout, note = bet, "🤝 هر دو بلک‌جک — شرطت برگشت."
-        elif bj_is_blackjack(player):
-            payout = int(bet * 2.5)
-            note = f"🂡 بلک‌جک! +{payout - bet} سانت"
-        else:
-            payout, note = 0, f"💥 دیلر بلک‌جک زد! {bet} سانت سوخت."
-        bj_settle(chat_id, uid, payout)
-        return await m.reply(bj_render(name, g, True, note + f"\n📏 سانت فعلی: {get_size(chat_id, uid)}"))
-    try:
-        sent = await m.reply(bj_render(name, g, False), reply_markup=bj_kb(uid))
-    except Exception:
-        bj_settle(chat_id, uid, bet)  # ارسال خراب شد: شرط برگرده
-        add_tokens(chat_id, uid, 1)   # توکن هم برگرده
-        raise
-    c.execute("UPDATE blackjack_games SET msg_id=? WHERE chat_id=? AND user_id=?", (sent.message_id, chat_id, uid))
-    db.commit()
-
-@dp.callback_query(F.data.startswith("bjk:"))
-async def bj_press(q: CallbackQuery):
-    parts = q.data.split(":")
-    if len(parts) != 3:
-        return await q.answer(NAV_LEGACY_MSG, show_alert=True)
-    _, viewer_id, action = parts
-    viewer_id = int(viewer_id)
-    if not await nav_guard(q, viewer_id):
-        return
-    chat_id = q.message.chat.id
-    g = bj_load(chat_id, viewer_id)
-    if not g or g["msg_id"] != q.message.message_id:
-        return await q.answer("⌛️ این دست تموم شده.", show_alert=True)
-    name = get_name(chat_id, viewer_id)
-    if int(time.time()) - g["ts"] > BJ_TTL:
-        res = bj_finish(chat_id, viewer_id, g, name)
-        await q.message.edit_text("⌛️ وقتت تموم شد؛ خودکار «بایست» زده شد.\n\n" + res, reply_markup=None)
-        return await q.answer()
-    if action == "hit":
-        g["player"].append(g["deck"].pop())
-        pv = bj_val(g["player"])
-        if pv > 21:
-            bj_settle(chat_id, viewer_id, 0)
-            await q.message.edit_text(
-                bj_render(name, g, True, f"💥 بیشتر از ۲۱ شد! {g['bet']} سانت سوخت.\n📏 سانت فعلی: {get_size(chat_id, viewer_id)}"),
-                reply_markup=None)
-            return await q.answer("💥 باختی!")
-        if pv == 21:
-            await q.message.edit_text(bj_finish(chat_id, viewer_id, g, name), reply_markup=None)
-            return await q.answer("۲۱!")
-        bj_save(chat_id, viewer_id, g)
-        await q.message.edit_text(bj_render(name, g, False), reply_markup=bj_kb(viewer_id))
-        return await q.answer()
-    if action == "stand":
-        await q.message.edit_text(bj_finish(chat_id, viewer_id, g, name), reply_markup=None)
-        return await q.answer()
-    await q.answer()
-
-# ===== فعالیت بازیکنا (برای پخش مالیات) =====
-# هر پیام تو گروه حساب می‌شه؛ «فعال‌ترین‌ها» = بیشترین پیام تو ACTIVITY_WINDOW_DAYS روز اخیر (فقط کسایی که بازیکن هستن)
-from aiogram import BaseMiddleware
-
-c.execute("""CREATE TABLE IF NOT EXISTS activity(
-    chat_id INTEGER,
-    user_id INTEGER,
-    day INTEGER,
-    cnt INTEGER DEFAULT 0,
-    PRIMARY KEY(chat_id, user_id, day)
-)""")
-db.commit()
-
-def record_activity(chat_id, uid):
-    day = int(time.time() // 86400)
-    c.execute(
-        "INSERT INTO activity(chat_id,user_id,day,cnt) VALUES(?,?,?,1) "
-        "ON CONFLICT(chat_id,user_id,day) DO UPDATE SET cnt=cnt+1",
-        (chat_id, uid, day)
-    )
-    db.commit()
-
-class ActivityMiddleware(BaseMiddleware):
-    async def __call__(self, handler, event, data):
-        try:
-            if (isinstance(event, Message) and event.chat.type in ("group", "supergroup")
-                    and event.from_user and not event.from_user.is_bot):
-                record_activity(event.chat.id, event.from_user.id)
-        except Exception:
-            logger.exception("activity record failed")
-        return await handler(event, data)
-
-dp.message.outer_middleware(ActivityMiddleware())
-
-def top_active(chat_id, exclude_uid=0, limit=TAX_RECIPIENTS):
-    since = int(time.time() // 86400) - ACTIVITY_WINDOW_DAYS + 1
-    rows = c.execute(
-        "SELECT a.user_id, SUM(a.cnt) AS n FROM activity a "
-        "JOIN users u ON u.chat_id=a.chat_id AND u.user_id=a.user_id "
-        "WHERE a.chat_id=? AND a.day>=? AND a.user_id!=? "
-        "GROUP BY a.user_id ORDER BY n DESC, a.user_id LIMIT ?",
-        (chat_id, since, exclude_uid, limit)
-    ).fetchall()
-    return [(r[0], r[1]) for r in rows]
-
-def distribute_tax(chat_id, payer_uid, amount):
-    """مالیات رو بین فعال‌ترین‌ها (به‌جز پرداخت‌کننده) پخش می‌کنه؛ commit با خود صدازننده‌ست.
-    خروجی: لیست (user_id, سهم). اگه فعالی نباشه لیست خالیه (مالیات می‌سوزه)."""
-    recips = [u for u, _ in top_active(chat_id, payer_uid)]
-    if not recips or amount <= 0:
-        return []
-    share, rem = divmod(amount, len(recips))
-    out = []
-    for i, uid in enumerate(recips):
-        part = share + (rem if i == 0 else 0)  # باقی‌مونده‌ی تقسیم می‌ره به فعال‌ترین
-        if part > 0:
-            c.execute("UPDATE users SET size=size+? WHERE chat_id=? AND user_id=?", (part, chat_id, uid))
-            out.append((uid, part))
-    return out
-
-# ===== راه فرار مالیاتی: لاگ دوئل‌ها و مینی‌گیم‌ها =====
-c.execute("""CREATE TABLE IF NOT EXISTS play_log(
-    chat_id INTEGER,
-    user_id INTEGER,
-    kind TEXT,
-    ts INTEGER
-)""")
-c.execute("CREATE INDEX IF NOT EXISTS idx_play_log ON play_log(chat_id, user_id, kind, ts)")
-db.commit()
-
-def log_play(chat_id, uid, kind):
-    """kind: 'duel' (دوئل تموم‌شده) یا 'game' (شروع یه مینی‌گیم)"""
-    c.execute("INSERT INTO play_log(chat_id,user_id,kind,ts) VALUES(?,?,?,?)", (chat_id, uid, kind, int(time.time())))
-    db.commit()
-
-def tax_exempt(chat_id, uid):
-    """خروجی: (معافه؟، تعداد دوئل، تعداد بازی) تو TAX_EVASION_WINDOW اخیر."""
-    since = int(time.time()) - TAX_EVASION_WINDOW
-    def count(kind):
-        return c.execute(
-            "SELECT COUNT(*) FROM play_log WHERE chat_id=? AND user_id=? AND kind=? AND ts>=?",
-            (chat_id, uid, kind, since)
-        ).fetchone()[0]
-    duels, games = count("duel"), count("game")
-    return (duels >= TAX_EVASION_DUELS and games >= TAX_EVASION_GAMES), duels, games
-
-def evade_status_text(chat_id, uid):
-    ex, nd, ng = tax_exempt(chat_id, uid)
-    state = "✅ الان از مالیات معافی!" if ex else "❌ هنوز نرسیدی"
-    return (
-        f"🕵️ راه فرار مالیاتی: {TAX_EVASION_DUELS} دوئل + {TAX_EVASION_GAMES} مینی‌گیم تو {TAX_EVASION_WINDOW//3600} ساعت اخیر = معافیت از هر دو مالیات\n"
-        f"📈 پیشرفت تو: {nd}/{TAX_EVASION_DUELS} دوئل | {ng}/{TAX_EVASION_GAMES} بازی — {state}"
-    )
-
-# ===== مالیات ثروت: هر ۲۴ ساعت ۵٪ سایز پولدارترین فرد گروه =====
-c.execute("""CREATE TABLE IF NOT EXISTS wealth_tax(
-    chat_id INTEGER PRIMARY KEY,
-    last_ts INTEGER
-)""")
-db.commit()
-
-def get_richest(chat_id):
-    return c.execute(
-        "SELECT user_id,size FROM users WHERE chat_id=? ORDER BY size DESC, user_id LIMIT 1", (chat_id,)
-    ).fetchone()
-
-def wealth_tax_amount(size_cm):
-    return 0 if size_cm <= 0 else max(1, int(size_cm * WEALTH_TAX_PCT + 0.5))
-
-async def apply_wealth_tax(bot, chat_id):
-    row = get_richest(chat_id)
-    if not row or row[1] <= 0:
-        return
-    uid, size_cm = row
-    exempt, nd, ng = tax_exempt(chat_id, uid)
-    if exempt:
-        await bot.send_message(
-            chat_id,
-            f"🕵️ فرار مالیاتی موفق!\n\n"
-            f"👑 {get_name(chat_id, uid)} پولدارترین فرد گروهه ولی تو {TAX_EVASION_WINDOW//3600} ساعت اخیر "
-            f"{nd} دوئل و {ng} بازی انجام داد و از مالیات امروز معاف شد.\n"
-            f"📏 سایزش: {size_cm} سانت\n\n"
-            f"⏳ مالیات بعدی {WEALTH_TAX_INTERVAL//3600} ساعت دیگه"
-        )
-        return
-    tax = min(size_cm, wealth_tax_amount(size_cm))
-    c.execute("UPDATE users SET size=size-? WHERE chat_id=? AND user_id=?", (tax, chat_id, uid))
-    payouts = distribute_tax(chat_id, uid, tax)
-    db.commit()
-    if payouts:
-        dist = f"\n\n🏆 مالیات بین {len(payouts)} فعال‌ترین بازیکن پخش شد:\n" + "\n".join(
-            f"🎁 {get_name(chat_id, u)}: +{amt} سانت" for u, amt in payouts)
-    else:
-        dist = "\n\n(بازیکن فعالی ثبت نشده بود؛ این بار مالیات سوخت.)"
-    await bot.send_message(
-        chat_id,
-        f"🏛 مالیات روزانه!\n\n"
-        f"👑 پولدارترین فرد گروه: {get_name(chat_id, uid)}\n"
-        f"📏 سایز قبل از مالیات: {size_cm} سانت\n"
-        f"💸 مالیات {int(WEALTH_TAX_PCT*100)}٪: {tax} سانت\n"
-        f"📏 سایز الان: {get_size(chat_id, uid)} سانت"
-        f"{dist}\n\n"
-        f"⏳ مالیات بعدی {WEALTH_TAX_INTERVAL//3600} ساعت دیگه"
-    )
-
-async def wealth_tax_loop(bot):
-    while True:
-        try:
-            now = int(time.time())
-            c.execute("DELETE FROM play_log WHERE ts<?", (now - 2 * TAX_EVASION_WINDOW,))
-            c.execute("DELETE FROM activity WHERE day<?", (now // 86400 - 30,))
-            db.commit()
-            chats = [r[0] for r in c.execute("SELECT DISTINCT chat_id FROM users WHERE chat_id<0").fetchall()]
-            for chat_id in chats:
-                try:
-                    row = c.execute("SELECT last_ts FROM wealth_tax WHERE chat_id=?", (chat_id,)).fetchone()
-                    if not row:  # اولین بار که گروه دیده می‌شه، تایمر ۲۴ ساعته از همین‌جا شروع می‌شه
-                        c.execute("INSERT INTO wealth_tax(chat_id,last_ts) VALUES(?,?)", (chat_id, now))
-                        db.commit()
-                        continue
-                    if now - row[0] >= WEALTH_TAX_INTERVAL:
-                        c.execute("UPDATE wealth_tax SET last_ts=? WHERE chat_id=?", (now, chat_id))
-                        db.commit()
-                        await apply_wealth_tax(bot, chat_id)
-                except Exception:
-                    logger.exception("wealth tax failed for chat %s", chat_id)
-        except Exception:
-            logger.exception("wealth_tax_loop error")
-        await asyncio.sleep(300)
-
-@dp.message(Command("tax"))
-async def tax_info(m: Message):
-    if m.chat.type == "private":
-        return await m.reply("❌ این دستور رو باید تو گروه بزنی.")
-    chat_id = m.chat.id
-    row = c.execute("SELECT last_ts FROM wealth_tax WHERE chat_id=?", (chat_id,)).fetchone()
-    if row:
-        left = WEALTH_TAX_INTERVAL - (int(time.time()) - row[0])
-        when = f"{fmt_time(left)} دیگه" if left > 0 else "تا چند دقیقه‌ی دیگه"
-    else:
-        when = "تایمرش هنوز شروع نشده (تا چند دقیقه‌ی دیگه شروع می‌شه)"
-    rich = get_richest(chat_id)
-    if rich and rich[1] > 0:
-        rich_txt = f"👑 الان پولدارترین: {get_name(chat_id, rich[0])} ({rich[1]} سانت) → مالیاتش: {min(rich[1], wealth_tax_amount(rich[1]))} سانت"
-        active = top_active(chat_id, rich[0])
-    else:
-        rich_txt = "👑 هنوز کسی سایز نداره."
-        active = top_active(chat_id, 0)
-    if active:
-        act_txt = "🏆 فعال‌ترین‌ها (گیرنده‌ی مالیات): " + "، ".join(f"{get_name(chat_id, u)} ({n} پیام)" for u, n in active)
-    else:
-        act_txt = "🏆 هنوز فعالی ثبت نشده (فعالیت از وقتی ربات آپدیت شد شمرده می‌شه)."
-    await m.reply(
-        "🏛 مالیات\n\n"
-        f"💰 مالیات ثروت: هر {WEALTH_TAX_INTERVAL//3600} ساعت {int(WEALTH_TAX_PCT*100)}٪ سایز پولدارترین فرد گروه کم می‌شه و بین {TAX_RECIPIENTS} فعال‌ترین بازیکن پخش می‌شه.\n"
-        f"{rich_txt}\n"
-        f"{act_txt}\n"
-        f"⏳ مالیات بعدی: {when}\n\n"
-        f"🌾 مالیات مزرعه: از صفحه‌ی {FARM_TAX_FROM_PAGE} پنل به بعد هر بار کاشتن {FARM_PLANT_TAX} سانت مالیات داره (اون هم بین فعال‌ترین‌ها پخش می‌شه).\n"
-        f"📊 «فعال» یعنی بیشترین پیام تو گروه تو {ACTIVITY_WINDOW_DAYS} روز اخیر.\n\n"
-        f"{evade_status_text(chat_id, m.from_user.id)}"
-    )
-
 async def main():
     bot=Bot(TOKEN)
     from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeDefault
@@ -4003,12 +2819,6 @@ async def main():
         BotCommand(command="tosperm", description="🧬 تبدیل سانت به اسپرم"),
         BotCommand(command="tocent", description="💰 تبدیل اسپرم به سانت"),
         BotCommand(command="top", description="🏆 جدول بزرگان"),
-        BotCommand(command="tax", description="🏛 مالیات پولدارترین فرد و مزرعه"),
-        BotCommand(command="token", description="🎟 توکن‌های من و قیمت توکن"),
-        BotCommand(command="buytoken", description="🛒 خرید توکن بازی"),
-        BotCommand(command="box", description="🎁 مینی‌گیم جعبه‌ی شانس (۱ توکن)"),
-        BotCommand(command="climb", description="🪜 مینی‌گیم نردبان (۱ توکن)"),
-        BotCommand(command="bj", description="🃏 بلک‌جک ۲۱ (۱ توکن)"),
         BotCommand(command="market", description="🛒 بازار سلبریتی"),
         BotCommand(command="collection", description="📚 کالکشن من"),
         BotCommand(command="spin", description="🎰 اسپین سلبریتی"),
@@ -4036,15 +2846,12 @@ async def main():
         BotCommand(command="luckydrop", description="🎉 دادن سانت به یه بازیکن رندوم (ادمین)"),
         BotCommand(command="bid", description="🔨 پیشنهاد دادن تو مزایده"),
         BotCommand(command="auctionstatus", description="📋 وضعیت مزایده‌های فعال"),
-        BotCommand(command="aucol", description="🗂 کالکشن مزایده‌های فعال"),
-        BotCommand(command="bidcol", description="🖼 کالکشن مزایده‌ی من (بالاترین پیشنهادها)"),
-        BotCommand(command="cancelbid", description="❌ لغو پیشنهاد من تو مزایده"),
+        BotCommand(command="myauctions", description="🗂️ کالکشن مزایده‌ی من"),
         BotCommand(command="auction", description="🔨 شروع مزایده (ادمین)"),
-        BotCommand(command="aulist", description="🔨 لیست سلبریتی‌های تیر مزایده"),
-        BotCommand(command="addau", description="➕ افزودن سلبریتی به تیر مزایده (ادمین)"),
-        BotCommand(command="giveau", description="🎁 دادن سلبریتی تیر مزایده به کاربر (ادمین)"),
         BotCommand(command="endauction", description="🏁 پایان مزایده (ادمین)"),
         BotCommand(command="resetgroup", description="⚠️ پاک کردن کامل داده‌های این گروه (ادمین)"),
+        BotCommand(command="backupdb", description="💾 بکاپ دیتابیس تو پیوی (ادمین)"),
+        BotCommand(command="restoredb", description="♻️ بازگردانی دیتابیس از فایل بکاپ (ادمین)"),
         BotCommand(command="addsperm", description="➕ افزودن اسپرم به کاربر (ادمین)"),
         BotCommand(command="addspermall", description="➕ افزودن اسپرم به همه (ادمین)"),
         BotCommand(command="addcb", description="👑 دادن/گرفتن سلبریتی از کاربر (ادمین)"),
@@ -4055,7 +2862,6 @@ async def main():
     asyncio.create_task(check_loans(bot))
     asyncio.create_task(company_dividend_loop(bot))
     asyncio.create_task(auction_loop(bot))
-    asyncio.create_task(wealth_tax_loop(bot))
     await dp.start_polling(bot)
 
 if __name__=="__main__":
